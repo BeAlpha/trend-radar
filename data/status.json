@@ -1,6 +1,6 @@
 {
   "lastRun": "2026-10-12",
-  "finishedAt": "2026-10-12T17:00:16.949Z",
+  "finishedAt": "2026-10-12T17:04:54.834Z",
   "countries": {
     "US": {
       "complete": false,
@@ -19,8 +19,8 @@
     },
     "FR": {
       "complete": false,
-      "requests": 54,
-      "errors": 0
+      "requests": 55,
+      "errors": 1
     },
     "IT": {
       "complete": false,
