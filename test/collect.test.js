@@ -96,3 +96,13 @@ test('expansionPrefixes: primul cuvant + spatiu, fara dubluri, cu limita', () =>
   assert.deepEqual(expansionPrefixes({ dates, scores }, index, 5), ['ai ', 'zoo ']);
   assert.deepEqual(expansionPrefixes({ dates, scores }, index, 1), ['ai ']);
 });
+
+test('runCountry: rularea de proba (smoke) nu e zi completa', async () => {
+  const dir = tmp();
+  const s = await runCountry({
+    country: 'US', date: '2026-10-12', dataDir: dir, apple: fakeApple(), smoke: true, log: () => {},
+    budget: { prefixes: ['a'], chartGenres: [] },
+  });
+  assert.equal(s.complete, false);
+  assert.equal(readJsonGz(dayPath(dir, '2026-10-12', 'US')).smoke, true);
+});

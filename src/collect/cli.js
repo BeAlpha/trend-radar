@@ -28,7 +28,7 @@ const budget = values.smoke
 
 const apple = makeAppleClient({ retry: makeRetry({ log: console.log }) });
 const summary = await runCountry({
-  country, date: values.date ?? todayUTC(), dataDir: values.data, apple, budget,
+  country, date: values.date ?? todayUTC(), dataDir: values.data, apple, budget, smoke: values.smoke,
 });
 // Iesim cu 0 si la zi incompleta: datele partiale tot se salveaza; finalize o marcheaza.
 console.log(JSON.stringify(summary));

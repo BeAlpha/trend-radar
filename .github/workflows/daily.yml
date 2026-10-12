@@ -35,13 +35,13 @@ jobs:
       matrix:
         country: [US, GB, DE, FR, IT, ES]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
       - name: Colectare ${{ matrix.country }}
         run: node src/collect/cli.js --country ${{ matrix.country }} --date ${{ needs.plan.outputs.date }} ${{ inputs.smoke && '--smoke' || '' }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: data-${{ matrix.country }}
           path: |
@@ -55,11 +55,11 @@ jobs:
     if: always() && needs.plan.result == 'success'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: data-*
           merge-multiple: true

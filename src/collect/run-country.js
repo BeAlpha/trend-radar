@@ -38,7 +38,7 @@ export function classificationQueue(index, todayScores, date) {
 
 export async function runCountry({
   country, date, dataDir, apple,
-  budget = {}, log = console.log, clock = Date.now,
+  budget = {}, smoke = false, log = console.log, clock = Date.now,
 }) {
   const {
     prefixes = prefixesFor(country),
@@ -114,9 +114,10 @@ export async function runCountry({
   }
 
   const { requests, failures } = counter.stats;
-  const complete = !aborted && counter.failureRate() <= MAX_FAILURE_RATE && suggest.length > 0;
+  // O rulare de proba acopera putine inceputuri: nu conteaza ca zi completa (ar strica trendurile).
+  const complete = !smoke && !aborted && counter.failureRate() <= MAX_FAILURE_RATE && suggest.length > 0;
   writeJsonGz(dayPath(dataDir, date, country), {
-    date, country, complete, requests, errors: failures, suggest, charts,
+    date, country, complete, smoke, requests, errors: failures, suggest, charts,
   });
   // Scris mereu (si gol), ca artefactul din GitHub sa pastreze structura data/days + data/classify.
   writeJsonGz(classifyPath(dataDir, date, country), classified);
