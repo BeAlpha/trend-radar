@@ -1,0 +1,14 @@
+{
+  "name": "trend-radar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Trend Radar ASO: cuvinte-cheie noi / in crestere din App Store (US, GB, DE, FR, IT, ES)",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "test": "node --test",
+    "collect": "node src/collect/cli.js",
+    "finalize": "node src/collect/finalize.js",
+    "start": "node src/local/start.js"
+  }
+}

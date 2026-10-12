@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trend Radar · ASO</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <aside class="side">
+    <div class="brand">Trend<span>Radar</span></div>
+    <nav id="nav">
+      <a data-view="new" class="active"><b>Nou</b><small>cuvinte apărute recent</small></a>
+      <a data-view="rising"><b>În creștere</b><small>scorul urcă</small></a>
+      <a data-view="top"><b>Top trafic</b><small>cele mai căutate</small></a>
+      <a data-view="falling"><b>În scădere</b><small>scorul coboară</small></a>
+      <a data-view="gone"><b>Dispărute</b><small>ieșite din sugestii</small></a>
+      <a data-view="themes"><b>Teme topuri</b><small>ce urcă în clasamente</small></a>
+      <a data-view="search"><b>Caută kw</b><small>istoric și app-uri</small></a>
+    </nav>
+    <div class="side-foot">
+      <button id="refresh" type="button">Descarcă date noi</button>
+      <p class="muted">Scorurile sunt <b>estimări</b> din sugestiile App Store, nu volumul oficial Apple.</p>
+    </div>
+  </aside>
+
+  <main>
+    <header class="status" id="status">Se încarcă…</header>
+
+    <section class="filters" id="filters">
+      <label>Țara
+        <select id="f-country"></select>
+      </label>
+      <label>Categoria
+        <select id="f-category"></select>
+      </label>
+      <label id="f-period-wrap">Perioada
+        <select id="f-period"></select>
+      </label>
+      <input id="f-text" type="search" placeholder="Filtrează după text…" autocomplete="off">
+      <a id="csv" class="btn ghost" href="#">Export CSV</a>
+    </section>
+
+    <div id="notice"></div>
+    <section id="content"></section>
+  </main>
+
+  <div id="tip" class="tip" role="tooltip" hidden></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

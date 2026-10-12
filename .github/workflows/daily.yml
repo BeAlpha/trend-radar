@@ -1,0 +1,76 @@
+name: daily-collect
+
+on:
+  schedule:
+    - cron: '0 4 * * *'   # zilnic 04:00 UTC
+  workflow_dispatch:
+    inputs:
+      smoke:
+        description: 'Rulare de proba (putine cereri)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-collect
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      date: ${{ steps.d.outputs.date }}
+    steps:
+      - id: d
+        run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
+  collect:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        country: [US, GB, DE, FR, IT, ES]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Colectare ${{ matrix.country }}
+        run: node src/collect/cli.js --country ${{ matrix.country }} --date ${{ needs.plan.outputs.date }} ${{ inputs.smoke && '--smoke' || '' }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: data-${{ matrix.country }}
+          path: |
+            data/days/${{ needs.plan.outputs.date }}/${{ matrix.country }}.json.gz
+            data/classify/${{ needs.plan.outputs.date }}/${{ matrix.country }}.json.gz
+          if-no-files-found: warn
+          retention-days: 3
+
+  commit:
+    needs: [plan, collect]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: data-*
+          merge-multiple: true
+          path: data
+      - name: Status
+        run: node src/collect/finalize.js --date ${{ needs.plan.outputs.date }}
+      - name: Commit
+        run: |
+          git config user.name "trend-radar-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          git commit -m "data: ${{ needs.plan.outputs.date }}" || echo "nimic de salvat"
+          git pull --rebase
+          git push

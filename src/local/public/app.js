@@ -1,0 +1,313 @@
+import { lineChart } from './chart.js';
+
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const api = async (path, opts) => {
+  const r = await fetch(path, opts);
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error ?? r.statusText);
+  return j;
+};
+
+// ---------- tooltip "?" ----------
+const tipEl = $('#tip');
+const tip = {
+  show(html, x, y) {
+    tipEl.innerHTML = html; tipEl.hidden = false;
+    const w = tipEl.offsetWidth, h = tipEl.offsetHeight;
+    tipEl.style.left = `${Math.min(x + 14, innerWidth - w - 8)}px`;
+    tipEl.style.top = `${y + h + 20 > innerHeight ? y - h - 10 : y + 16}px`;
+  },
+  hide() { tipEl.hidden = true; },
+};
+document.addEventListener('mouseover', (e) => {
+  const q = e.target.closest('[data-tip]');
+  if (q) tip.show(esc(q.dataset.tip), e.clientX, e.clientY);
+});
+document.addEventListener('mouseout', (e) => { if (e.target.closest('[data-tip]')) tip.hide(); });
+const q = (text) => `<span class="q" data-tip="${esc(text)}">?</span>`;
+
+const HELP = {
+  score: 'Scor estimat 0–100 din sugestiile App Store: 70–100 = apare după o singură literă, 40–69 = după 2 litere, 10–39 = doar după un cuvânt + spațiu. Mai sus în listă = scor mai mare. NU e volumul oficial Apple.',
+  delta: 'Diferența dintre media scorului din ultimele 3 zile și media de acum 7 (sau 30) de zile. Zilele cu colectare incompletă nu se pun la socoteală.',
+  then: 'Media scorului în fereastra de comparație (acum 7–9 zile, sau 30–32 zile).',
+  category: 'Categoria majoritară a primelor 10 app-uri din căutarea pentru acest cuvânt (minim 4 din 10). „Mixt” = rezultate amestecate. „Neclasificat” = în coada de clasificare.',
+  difficulty: 'Mediana numărului de rating-uri ale primelor 10 app-uri: ●○○ sub 1.000, ●●○ sub 50.000, ●●● peste.',
+  confirmed: 'Confirmat = cuvântul a fost văzut din nou în cel puțin încă o zi din prima săptămână. Neconfirmat poate fi zgomot de o zi.',
+  firstSeen: 'Prima zi în care cuvântul a apărut în sugestii în această țară, de când colectăm.',
+  seenDays: 'În câte din cele 7 zile dinaintea ultimelor 3 a fost văzut.',
+};
+
+// ---------- stare ----------
+const VIEWS = {
+  new: { title: 'Nou', periods: [[1, 'Ultimele 24h'], [7, 'Ultimele 7 zile'], [30, 'Ultimele 30 zile']], def: 7 },
+  rising: { title: 'În creștere', periods: [[7, 'față de acum 7 zile'], [30, 'față de acum 30 zile']], def: 7 },
+  falling: { title: 'În scădere', periods: [[7, 'față de acum 7 zile'], [30, 'față de acum 30 zile']], def: 7 },
+  top: { title: 'Top trafic', periods: null },
+  gone: { title: 'Dispărute', periods: null },
+  themes: { title: 'Teme topuri', periods: null },
+  search: { title: 'Caută kw', periods: null },
+};
+const state = { view: 'new', country: 'US', category: 'all', period: 7, text: '', sort: null, rows: [], term: '' };
+
+const COLS = {
+  country: { label: 'Țara' },
+  term: { label: 'Cuvânt' },
+  score: { label: 'Scor*', num: true, help: 'score' },
+  then: { label: 'Atunci', num: true, help: 'then' },
+  delta: { label: 'Δ', num: true, help: 'delta' },
+  categoryName: { label: 'Categorie', help: 'category' },
+  difficulty: { label: 'Dificultate', help: 'difficulty' },
+  confirmed: { label: 'Stare', help: 'confirmed' },
+  firstSeen: { label: 'Prima apariție', help: 'firstSeen' },
+  seenDays: { label: 'Zile văzut', num: true, help: 'seenDays' },
+  lastSeen: { label: 'Ultima dată' },
+};
+const VIEW_COLS = {
+  new: ['term', 'score', 'categoryName', 'difficulty', 'confirmed', 'firstSeen'],
+  rising: ['term', 'score', 'then', 'delta', 'categoryName', 'difficulty', 'firstSeen'],
+  falling: ['term', 'score', 'then', 'delta', 'categoryName', 'difficulty'],
+  top: ['term', 'score', 'categoryName', 'difficulty', 'firstSeen'],
+  gone: ['term', 'score', 'seenDays', 'lastSeen', 'categoryName'],
+};
+
+const diffDots = (d) => (d == null ? '<span class="muted">–</span>' : `<span class="diff">${'●'.repeat(d)}${'○'.repeat(3 - d)}</span>`);
+function cell(col, r) {
+  const v = r[col];
+  switch (col) {
+    case 'term': return `<td class="term"><a data-term="${esc(r.term)}">${esc(r.term)}</a></td>`;
+    case 'score': return `<td class="num">${v ?? '–'}<span class="scorebar"><i style="width:${Math.max(0, Math.min(100, v ?? 0))}%"></i></span></td>`;
+    case 'delta': return `<td class="num ${v > 0 ? 'up' : 'down'}">${v > 0 ? '+' : ''}${v}</td>`;
+    case 'then': case 'seenDays': return `<td class="num">${v ?? '–'}</td>`;
+    case 'categoryName': return `<td>${esc(v)}${r.subgenreName ? ` <span class="muted">· ${esc(r.subgenreName)}</span>` : ''}</td>`;
+    case 'difficulty': return `<td>${diffDots(v)}</td>`;
+    case 'confirmed': return `<td>${v ? '<span class="badge ok">confirmat</span>' : '<span class="badge new">nou</span>'}</td>`;
+    default: return `<td>${esc(v ?? '–')}</td>`;
+  }
+}
+
+// ---------- status ----------
+async function loadStatus() {
+  const s = await api('/api/status');
+  const parts = [];
+  if (!s.cloud) {
+    parts.push('<span class="pill warn">Nicio colectare din cloud încă</span>');
+  } else {
+    const age = s.ageHours != null ? `acum ${s.ageHours < 1 ? '<1' : Math.round(s.ageHours)}h` : '';
+    parts.push(`<span class="pill ${s.stale ? 'warn' : 'ok'}">Ultima colectare: ${esc(s.cloud.lastRun)} ${age}</span>`);
+    if (s.stale) parts.push('<span class="pill warn">Mai veche de 48h: colectarea din cloud nu a mai rulat</span>');
+    const missing = Object.entries(s.cloud.countries).filter(([, c]) => c.missing || !c.complete).map(([cc]) => cc);
+    if (missing.length) parts.push(`<span class="pill bad">Incomplet azi: ${missing.join(', ')}</span>`);
+  }
+  for (const [cc, c] of Object.entries(s.local.countries)) {
+    if (c.days && !c.warmup.done) parts.push(`<span class="pill">${cc}: se adună baza ${c.warmup.count}/7 zile</span>`);
+  }
+  if (s.local.problems.length) parts.push(`<span class="pill bad" data-tip="${esc(s.local.problems.map((p) => `${p.path}: ${p.error}`).join('; '))}">${s.local.problems.length} fișiere cu probleme</span>`);
+  $('#status').innerHTML = parts.join('');
+  state.status = s;
+}
+
+async function loadMeta() {
+  const m = await api('/api/meta');
+  $('#f-country').innerHTML = [...m.countries.map((c) => `<option>${c}</option>`), '<option value="ALL">Toate 6</option>'].join('');
+  $('#f-country').value = state.country;
+  $('#f-category').innerHTML = ['<option value="all">Toate</option>',
+    ...m.categories.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`),
+    '<option value="none">Neclasificat</option>'].join('');
+  $('#f-category').value = state.category;
+}
+
+// ---------- randare ----------
+function setupFilters() {
+  const v = VIEWS[state.view];
+  const isTable = !!VIEW_COLS[state.view];
+  $('#filters').style.display = state.view === 'search' ? 'none' : '';
+  $('#f-period-wrap').style.display = v.periods ? '' : 'none';
+  $('#f-text').style.display = isTable ? '' : 'none';
+  $('#csv').style.display = isTable ? '' : 'none';
+  if (v.periods) {
+    $('#f-period').innerHTML = v.periods.map(([val, label]) => `<option value="${val}">${label}</option>`).join('');
+    if (!v.periods.some(([val]) => val === state.period)) state.period = v.def;
+    $('#f-period').value = state.period;
+  }
+  $('#csv').href = `/api/csv?${new URLSearchParams({ name: state.view, country: state.country, category: state.category, period: state.period })}`;
+}
+
+function notice(meta) {
+  const notes = [];
+  if (['new', 'gone'].includes(state.view)) {
+    for (const [cc, m] of Object.entries(meta)) {
+      if (!m.warmup.done) notes.push(`${cc}: se adună baza ${m.warmup.count}/7 zile. Până atunci nu putem spune ce e „nou” sau „dispărut”, la început totul ar părea nou.`);
+    }
+  }
+  if (['rising', 'falling'].includes(state.view) && Object.values(meta).every((m) => !m.latest)) {
+    notes.push('Încă nu sunt zile complete colectate.');
+  }
+  $('#notice').innerHTML = notes.map((n) => `<div class="notice">${esc(n)}</div>`).join('');
+}
+
+function renderTable() {
+  let cols = VIEW_COLS[state.view];
+  if (state.country === 'ALL') cols = ['country', ...cols];
+  const t = state.text.trim().toLowerCase();
+  let rows = t ? state.rows.filter((r) => r.term.includes(t)) : [...state.rows];
+  if (state.sort) {
+    const { col, dir } = state.sort;
+    rows.sort((a, b) => {
+      const x = a[col], y = b[col];
+      if (x == null) return 1; if (y == null) return -1;
+      return (typeof x === 'number' ? x - y : String(x).localeCompare(String(y))) * dir;
+    });
+  }
+  const head = cols.map((c) => {
+    const def = COLS[c];
+    const arrow = state.sort?.col === c ? `<span class="arrow">${state.sort.dir > 0 ? '▲' : '▼'}</span>` : '';
+    return `<th class="${def.num ? 'num' : ''}" data-sort="${c}">${def.label}${def.help ? q(HELP[def.help]) : ''} ${arrow}</th>`;
+  }).join('');
+  const shown = rows.slice(0, 500);
+  $('#content').innerHTML = rows.length
+    ? `<p class="count">${rows.length} cuvinte${rows.length > shown.length ? ` · afișate primele ${shown.length} (exportă CSV pentru toate)` : ''}${state.total > state.rows.length ? ` · total ${state.total}` : ''}</p>
+       <div class="card"><table><thead><tr>${head}</tr></thead>
+       <tbody>${shown.map((r) => `<tr>${cols.map((c) => cell(c, r)).join('')}</tr>`).join('')}</tbody></table></div>`
+    : '<div class="card empty">Nimic de afișat pentru filtrele alese.</div>';
+}
+
+async function renderView() {
+  setupFilters();
+  $('#notice').innerHTML = '';
+  if (state.view === 'themes') return renderThemes();
+  if (state.view === 'search') return renderSearch();
+  $('#content').innerHTML = '<div class="empty">Se calculează…</div>';
+  const params = new URLSearchParams({ name: state.view, country: state.country, category: state.category, period: state.period });
+  const r = await api(`/api/view?${params}`);
+  state.rows = r.rows; state.total = r.total;
+  notice(r.meta);
+  renderTable();
+}
+
+async function renderThemes() {
+  $('#content').innerHTML = '<div class="empty">Se calculează…</div>';
+  const groups = await api(`/api/themes?${new URLSearchParams({ country: state.country, category: state.category })}`);
+  if (!groups.length) { $('#content').innerHTML = '<div class="card empty">Încă nu sunt topuri colectate.</div>'; return; }
+  const noHistory = groups.every((g) => g.historyDays === 0);
+  $('#notice').innerHTML = noHistory
+    ? '<div class="notice">Topurile au o singură zi colectată: „nou intrat” și „urcare” apar după ce avem cel puțin o zi anterioară (urcarea pe 7 zile cere o săptămână).</div>'
+    : '';
+  $('#content').innerHTML = `<div class="themes">${groups.map((g) => `
+    <div class="card theme-card">
+      <h3>${esc(g.genreName)} ${state.country === 'ALL' ? `<span class="muted">· ${g.country}</span>` : ''}</h3>
+      <div class="sub">${g.movers.length} app-uri noi sau în urcare · ${g.date}</div>
+      ${g.themes.slice(0, 8).map((t) => `
+        <details class="theme"><summary><b>${esc(t.theme)}</b><span class="muted">${t.count} app-uri</span></summary>
+          <ul>${t.apps.map((a) => `<li>${esc(a.name)} <span class="muted">· #${a.rank} ${a.kind === 'new' ? 'nou intrat' : `↑${a.climb}`} · ${a.type === 'toppaidapplications' ? 'plătite' : 'gratuite'}</span></li>`).join('')}</ul>
+        </details>`).join('') || '<div class="muted">Nicio temă comună (minim 2 app-uri).</div>'}
+      ${g.movers.length ? `<div class="movers">Mișcări: ${g.movers.slice(0, 6).map((m) => esc(m.name)).join(' · ')}${g.movers.length > 6 ? ' …' : ''}</div>` : ''}
+    </div>`).join('')}</div>`;
+}
+
+// ---------- Cauta kw ----------
+function renderSearch() {
+  $('#content').innerHTML = `
+    <div class="search-box"><input id="kw" type="search" placeholder="Scrie un cuvânt-cheie, ex: ai photo" autocomplete="off" value="${esc(state.term)}"><div class="ac" id="ac" hidden></div></div>
+    <div id="kw-result"></div>`;
+  const input = $('#kw'), ac = $('#ac');
+  let timer;
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const v = input.value.trim();
+      if (v.length < 2) { ac.hidden = true; return; }
+      const list = await api(`/api/suggest?q=${encodeURIComponent(v)}`);
+      ac.innerHTML = list.map((t) => `<div data-pick="${esc(t)}">${esc(t)}</div>`).join('');
+      ac.hidden = !list.length;
+    }, 150);
+  });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { ac.hidden = true; showTerm(input.value); } });
+  ac.addEventListener('click', (e) => {
+    const t = e.target.closest('[data-pick]')?.dataset.pick;
+    if (t) { input.value = t; ac.hidden = true; showTerm(t); }
+  });
+  if (state.term) showTerm(state.term); else input.focus();
+}
+
+async function showTerm(term) {
+  term = term.trim().toLowerCase();
+  if (!term) return;
+  state.term = term;
+  const out = $('#kw-result');
+  out.innerHTML = '<div class="empty">Se încarcă…</div>';
+  const r = await api(`/api/term?q=${encodeURIComponent(term)}`);
+  const seen = r.countries.filter((c) => c.firstSeen);
+  const withApps = r.countries.find((c) => c.topAppIds.length);
+  out.innerHTML = `
+    <div class="grid2">
+      <div class="card panel"><h3>Scor estimat în timp ${q(HELP.score)}</h3><div class="chart" id="kw-chart"></div></div>
+      <div class="card panel"><h3>Primele app-uri ${withApps ? `<span class="muted">(${withApps.country})</span>` : ''}</h3><ul class="apps" id="kw-apps"><li class="muted">${withApps ? 'Se încarcă…' : 'Cuvântul nu e clasificat încă.'}</li></ul></div>
+    </div>
+    <div class="card" style="margin-top:14px"><table><thead><tr>
+      <th>Țara</th><th class="num">Scor azi ${q(HELP.score)}</th><th>Apare la</th><th>Categorie ${q(HELP.category)}</th>
+      <th>Dificultate ${q(HELP.difficulty)}</th><th>Prima apariție ${q(HELP.firstSeen)}</th><th>Ultima</th></tr></thead>
+      <tbody>${r.countries.map((c) => `<tr>
+        <td>${c.country}</td>
+        <td class="num">${c.last && c.last.date === c.lastSeen ? c.last.score : '–'}</td>
+        <td>${c.last ? `„${esc(c.last.prefix)}” → poziția ${c.last.position}` : '<span class="muted">nevăzut</span>'}</td>
+        <td>${esc(c.category ?? '–')}${c.subgenre ? ` <span class="muted">· ${esc(c.subgenre)}</span>` : ''}</td>
+        <td>${diffDots(c.difficulty)}</td>
+        <td>${esc(c.firstSeen ?? '–')}</td><td>${esc(c.lastSeen ?? '–')}</td></tr>`).join('')}</tbody></table></div>
+    ${seen.length ? '' : '<div class="notice info" style="margin-top:14px">Cuvântul nu a apărut în sugestiile colectate. Poate fi prea puțin căutat sau e mai lung decât ce prindem (2 litere + extindere).</div>'}`;
+  lineChart($('#kw-chart'), r.countries.map((c) => ({ country: c.country, points: c.history })), tip);
+  if (withApps) {
+    try {
+      const apps = await api(`/api/apps?ids=${withApps.topAppIds.join(',')}&country=${withApps.country}`);
+      $('#kw-apps').innerHTML = apps.map((a, i) => `<li><span class="muted">${i + 1}</span><img src="${esc(a.icon)}" alt="" loading="lazy">
+        <div><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
+        <div class="meta">${esc(a.seller)} · ${a.ratings.toLocaleString('ro-RO')} rating-uri${a.rating ? ` · ${a.rating.toFixed(1)}★` : ''}</div></div></li>`).join('');
+    } catch (err) {
+      $('#kw-apps').innerHTML = `<li class="muted">Nu am putut încărca app-urile: ${esc(err.message)}</li>`;
+    }
+  }
+}
+
+// ---------- evenimente ----------
+$('#nav').addEventListener('click', (e) => {
+  const a = e.target.closest('a[data-view]');
+  if (!a) return;
+  document.querySelectorAll('#nav a').forEach((x) => x.classList.toggle('active', x === a));
+  state.view = a.dataset.view; state.sort = null;
+  renderView().catch(showError);
+});
+$('#f-country').addEventListener('change', (e) => { state.country = e.target.value; renderView().catch(showError); });
+$('#f-category').addEventListener('change', (e) => { state.category = e.target.value; renderView().catch(showError); });
+$('#f-period').addEventListener('change', (e) => { state.period = Number(e.target.value); renderView().catch(showError); });
+$('#f-text').addEventListener('input', (e) => { state.text = e.target.value; renderTable(); });
+$('#content').addEventListener('click', (e) => {
+  const th = e.target.closest('th[data-sort]');
+  if (th) {
+    const col = th.dataset.sort;
+    state.sort = state.sort?.col === col ? { col, dir: -state.sort.dir } : { col, dir: COLS[col].num ? -1 : 1 };
+    return renderTable();
+  }
+  const t = e.target.closest('a[data-term]')?.dataset.term;
+  if (t) {
+    state.term = t; state.view = 'search';
+    document.querySelectorAll('#nav a').forEach((x) => x.classList.toggle('active', x.dataset.view === 'search'));
+    renderView().catch(showError);
+  }
+});
+$('#refresh').addEventListener('click', async (e) => {
+  const b = e.target; b.disabled = true; b.textContent = 'Se descarcă…';
+  try {
+    const r = await api('/api/refresh', { method: 'POST' });
+    if (r.warning) $('#notice').innerHTML = `<div class="notice">${esc(r.warning)}</div>`;
+    await loadMeta(); await loadStatus(); await renderView();
+  } catch (err) { showError(err); } finally { b.disabled = false; b.textContent = 'Descarcă date noi'; }
+});
+
+function showError(err) {
+  $('#content').innerHTML = `<div class="notice">Eroare: ${esc(err.message)}</div>`;
+}
+
+(async () => {
+  await Promise.all([loadMeta(), loadStatus()]);
+  await renderView();
+})().catch(showError);
