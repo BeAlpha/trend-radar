@@ -60,7 +60,7 @@ export function makeViews(db) {
     return r.category === Number(category);
   };
 
-  function view({ name, country = 'US', category = 'all', period = 7 }) {
+  function view({ name, country = 'US', category = 'all', period = 7, limit = MAX_ROWS }) {
     const ccs = country === 'ALL' ? COUNTRIES : [country];
     const p = Number(period) || 7;
     let rows = [];
@@ -77,7 +77,7 @@ export function makeViews(db) {
       rows.push(...list.map((r) => enrich(cc, index, r)));
     }
     rows = rows.filter(matchCategory(category));
-    return { total: rows.length, rows: rows.slice(0, MAX_ROWS), meta };
+    return { total: rows.length, rows: rows.slice(0, limit), meta };
   }
 
   function chartList(cc, date, type, genreId) {

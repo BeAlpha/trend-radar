@@ -65,7 +65,7 @@ export function createServer({ db, dataDir, refresh = async () => ({}), apple = 
         return sendJson(res, r);
       }
       if (url.pathname === '/api/csv') {
-        const v = views.view({ name: url.searchParams.get('name'), country: url.searchParams.get('country'), category: url.searchParams.get('category'), period: url.searchParams.get('period') });
+        const v = views.view({ name: url.searchParams.get('name'), country: url.searchParams.get('country'), category: url.searchParams.get('category'), period: url.searchParams.get('period'), limit: Infinity });
         res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="trend-radar-${url.searchParams.get('name')}.csv"` });
         return res.end(`﻿${toCsv(v.rows)}`);
       }
