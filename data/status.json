@@ -1,0 +1,36 @@
+{
+  "lastRun": "2026-10-12",
+  "finishedAt": "2026-10-12T16:59:12.049Z",
+  "countries": {
+    "US": {
+      "complete": true,
+      "requests": 54,
+      "errors": 0
+    },
+    "GB": {
+      "complete": true,
+      "requests": 54,
+      "errors": 0
+    },
+    "DE": {
+      "complete": true,
+      "requests": 54,
+      "errors": 0
+    },
+    "FR": {
+      "complete": true,
+      "requests": 54,
+      "errors": 0
+    },
+    "IT": {
+      "complete": true,
+      "requests": 54,
+      "errors": 0
+    },
+    "ES": {
+      "complete": true,
+      "requests": 54,
+      "errors": 0
+    }
+  }
+}
