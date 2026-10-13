@@ -172,17 +172,53 @@ function renderTable() {
     : '<div class="card empty">Nimic de afișat pentru filtrele alese.</div>';
 }
 
-async function renderView() {
+// Rezultatele listelor raman in memorie: la "Inapoi" lista apare instant, fara recalculare.
+const viewCache = new Map();
+
+async function renderView(scrollY = 0) {
   setupFilters();
+  syncControls();
   $('#notice').innerHTML = '';
-  if (state.view === 'themes') return renderThemes();
-  if (state.view === 'search') return renderSearch();
-  $('#content').innerHTML = '<div class="empty">Se calculează…</div>';
+  if (state.view === 'search') { renderSearch(); return window.scrollTo(0, 0); }
+  if (state.view === 'themes') { await renderThemes(); return window.scrollTo(0, scrollY); }
   const params = new URLSearchParams({ name: state.view, country: state.country, category: state.category, period: state.period });
-  const r = await api(`/api/view?${params}`);
+  const key = params.toString();
+  if (!viewCache.has(key)) {
+    $('#content').innerHTML = '<div class="empty">Se calculează…</div>';
+    viewCache.set(key, await api(`/api/view?${params}`));
+  }
+  const r = viewCache.get(key);
   state.rows = r.rows; state.total = r.total;
   notice(r.meta);
   renderTable();
+  window.scrollTo(0, scrollY);
+}
+
+// ---------- istoric (butonul Inapoi al browserului / gestul de pe trackpad) ----------
+history.scrollRestoration = 'manual';
+const snapshot = () => ({
+  view: state.view, country: state.country, category: state.category, period: state.period,
+  term: state.term, text: state.text, sort: state.sort, from: state.from ?? null,
+});
+// Pagina noua: memoram unde eram (inclusiv scroll-ul) in intrarea curenta, apoi adaugam una noua.
+function navigate(changes) {
+  history.replaceState({ ...snapshot(), scrollY: window.scrollY }, '');
+  Object.assign(state, changes);
+  history.pushState(snapshot(), '');
+  renderView(0).catch(showError);
+}
+// Schimbare de filtre pe aceeasi pagina: nu adauga pas nou in istoric.
+const remember = () => history.replaceState({ ...snapshot(), scrollY: window.scrollY }, '');
+window.addEventListener('popstate', (e) => {
+  if (!e.state) return;
+  Object.assign(state, e.state);
+  renderView(e.state.scrollY ?? 0).catch(showError);
+});
+function syncControls() {
+  document.querySelectorAll('#nav a').forEach((x) => x.classList.toggle('active', x.dataset.view === state.view));
+  $('#f-country').value = state.country;
+  $('#f-category').value = state.category;
+  $('#f-text').value = state.text;
 }
 
 async function renderThemes() {
@@ -207,10 +243,12 @@ async function renderThemes() {
 
 // ---------- Cauta kw ----------
 function renderSearch() {
-  $('#content').innerHTML = `
+  const back = state.from ? `<button type="button" class="btn ghost back" id="back">← Înapoi la ${esc(VIEWS[state.from]?.title ?? 'listă')}</button>` : '';
+  $('#content').innerHTML = `${back}
     <div class="search-box"><input id="kw" type="search" placeholder="Scrie un cuvânt-cheie, ex: ai photo" autocomplete="off" value="${esc(state.term)}"><div class="ac" id="ac" hidden></div></div>
     <div id="kw-result"></div>`;
   const input = $('#kw'), ac = $('#ac');
+  $('#back')?.addEventListener('click', () => history.back());
   let timer;
   input.addEventListener('input', () => {
     clearTimeout(timer);
@@ -234,6 +272,7 @@ async function showTerm(term) {
   term = term.trim().toLowerCase();
   if (!term) return;
   state.term = term;
+  remember();
   const out = $('#kw-result');
   out.innerHTML = '<div class="empty">Se încarcă…</div>';
   const r = await api(`/api/term?q=${encodeURIComponent(term)}`);
@@ -272,34 +311,31 @@ async function showTerm(term) {
 $('#nav').addEventListener('click', (e) => {
   const a = e.target.closest('a[data-view]');
   if (!a) return;
-  document.querySelectorAll('#nav a').forEach((x) => x.classList.toggle('active', x === a));
-  state.view = a.dataset.view; state.sort = null;
-  renderView().catch(showError);
+  navigate({ view: a.dataset.view, sort: null, text: '', from: null });
 });
-$('#f-country').addEventListener('change', (e) => { state.country = e.target.value; renderView().catch(showError); });
-$('#f-category').addEventListener('change', (e) => { state.category = e.target.value; renderView().catch(showError); });
-$('#f-period').addEventListener('change', (e) => { state.period = Number(e.target.value); renderView().catch(showError); });
-$('#f-text').addEventListener('input', (e) => { state.text = e.target.value; renderTable(); });
+const onFilter = (fn) => (e) => { fn(e.target.value); remember(); renderView().then(remember).catch(showError); };
+$('#f-country').addEventListener('change', onFilter((v) => { state.country = v; }));
+$('#f-category').addEventListener('change', onFilter((v) => { state.category = v; }));
+$('#f-period').addEventListener('change', onFilter((v) => { state.period = Number(v); }));
+$('#f-text').addEventListener('input', (e) => { state.text = e.target.value; renderTable(); remember(); });
 $('#content').addEventListener('click', (e) => {
   const th = e.target.closest('th[data-sort]');
   if (th) {
     const col = th.dataset.sort;
     state.sort = state.sort?.col === col ? { col, dir: -state.sort.dir } : { col, dir: COLS[col].num ? -1 : 1 };
-    return renderTable();
+    renderTable();
+    return remember();
   }
   const t = e.target.closest('a[data-term]')?.dataset.term;
-  if (t) {
-    state.term = t; state.view = 'search';
-    document.querySelectorAll('#nav a').forEach((x) => x.classList.toggle('active', x.dataset.view === 'search'));
-    renderView().catch(showError);
-  }
+  if (t) navigate({ term: t, view: 'search', from: state.view });
 });
 $('#refresh').addEventListener('click', async (e) => {
   const b = e.target; b.disabled = true; b.textContent = 'Se descarcă…';
   try {
     const r = await api('/api/refresh', { method: 'POST' });
     if (r.warning) $('#notice').innerHTML = `<div class="notice">${esc(r.warning)}</div>`;
-    await loadMeta(); await loadStatus(); await renderView();
+    viewCache.clear();
+    await loadMeta(); await loadStatus(); await renderView(window.scrollY);
   } catch (err) { showError(err); } finally { b.disabled = false; b.textContent = 'Descarcă date noi'; }
 });
 
@@ -309,5 +345,6 @@ function showError(err) {
 
 (async () => {
   await Promise.all([loadMeta(), loadStatus()]);
+  history.replaceState(snapshot(), '');
   await renderView();
 })().catch(showError);
