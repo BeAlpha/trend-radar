@@ -1,16 +1,16 @@
 {
-  "lastRun": "2026-10-12",
-  "finishedAt": "2026-10-12T20:21:18.805Z",
+  "lastRun": "2026-10-13",
+  "finishedAt": "2026-10-13T11:17:19.376Z",
   "countries": {
     "US": {
       "complete": true,
-      "requests": 3450,
+      "requests": 3449,
       "errors": 1
     },
     "GB": {
       "complete": true,
       "requests": 3450,
-      "errors": 1
+      "errors": 0
     },
     "DE": {
       "complete": true,
@@ -24,13 +24,13 @@
     },
     "IT": {
       "complete": true,
-      "requests": 3454,
+      "requests": 3446,
       "errors": 0
     },
     "ES": {
       "complete": true,
       "requests": 3456,
-      "errors": 0
+      "errors": 1
     }
   }
 }
