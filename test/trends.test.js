@@ -42,9 +42,19 @@ test('newTerms: perioada 1 = doar ziua ultima', () => {
   assert.deepEqual(newTerms(s, index, 7).map((x) => x.term).sort(), ['azi', 'ieri']);
 });
 
-test('newTerms: nimic in perioada de pornire', () => {
-  const s = series(days('2026-01-01', 3, () => ({ x: 10 })));
-  assert.deepEqual(newTerms(s, new Map([['x', { firstSeen: '2026-01-03' }]]), 7), []);
+test('newTerms: in perioada de pornire = preliminar, fata de prima zi', () => {
+  const s = series(days('2026-01-01', 3, (i) => (i === 0 ? { x: 10 } : { x: 10, y: 20 })));
+  const index = new Map([['x', { firstSeen: '2026-01-01' }], ['y', { firstSeen: '2026-01-02' }]]);
+  const r = newTerms(s, index, 7);
+  assert.deepEqual(r.map((t) => t.term), ['y']);
+  assert.equal(r[0].preliminary, true);
+  assert.equal(r[0].seenDays, 2);
+  assert.equal(r[0].ofDays, 2);
+});
+
+test('newTerms: o singura zi colectata = nimic', () => {
+  const s = series(days('2026-01-01', 1, () => ({ x: 10 })));
+  assert.deepEqual(newTerms(s, new Map([['x', { firstSeen: '2026-01-01' }]]), 7), []);
 });
 
 test('isConfirmed: o singura zi = neconfirmat', () => {

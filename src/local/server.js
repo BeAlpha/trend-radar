@@ -14,9 +14,11 @@ const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public')
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
 const STALE_HOURS = 48;
 
-const CSV_COLS = ['country', 'term', 'score', 'delta', 'then', 'categoryName', 'subgenreName', 'difficulty', 'confirmed', 'firstSeen'];
+const CSV_COLS = ['country', 'term', 'score', 'delta', 'then', 'categoryName', 'subgenreName', 'difficulty', 'confirmed', 'seenDays', 'ofDays', 'firstSeen'];
 const csvCell = (v) => (v == null ? '' : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
 export const toCsv = (rows) => [CSV_COLS.join(','), ...rows.map((r) => CSV_COLS.map((c) => csvCell(r[c])).join(','))].join('\n');
+
+const LOOKUP_CHUNK = 100;
 
 function readCloudStatus(dataDir) {
   try {
@@ -32,8 +34,8 @@ export function createServer({ db, dataDir, refresh = async () => ({}), apple = 
 
   async function lookupApps(ids, cc) {
     const missing = ids.filter((id) => !appCache.has(`${cc}:${id}`));
-    if (missing.length) {
-      for (const a of await apple.lookup(missing, cc)) appCache.set(`${cc}:${a.id}`, a);
+    for (let i = 0; i < missing.length; i += LOOKUP_CHUNK) {
+      for (const a of await apple.lookup(missing.slice(i, i + LOOKUP_CHUNK), cc)) appCache.set(`${cc}:${a.id}`, a);
     }
     return ids.map((id) => appCache.get(`${cc}:${id}`)).filter(Boolean);
   }
@@ -50,9 +52,18 @@ export function createServer({ db, dataDir, refresh = async () => ({}), apple = 
     '/api/term': (q) => views.termView(q.get('q') ?? ''),
     '/api/suggest': (q) => views.suggestTerms(q.get('q') ?? ''),
     '/api/apps': async (q) => {
-      const ids = (q.get('ids') ?? '').split(',').map(Number).filter(Boolean).slice(0, 10);
+      const ids = (q.get('ids') ?? '').split(',').map(Number).filter(Boolean).slice(0, LOOKUP_CHUNK);
       const cc = COUNTRIES.includes(q.get('country')) ? q.get('country') : 'US';
       return ids.length ? lookupApps(ids, cc) : [];
+    },
+    // Cuvant inca neclasificat: cautam live primele 10 app-uri (o singura cerere, apoi din cache).
+    '/api/live-apps': async (q) => {
+      const term = (q.get('term') ?? '').trim().toLowerCase();
+      const cc = COUNTRIES.includes(q.get('country')) ? q.get('country') : 'US';
+      if (!term) throw new Error('term lipsa');
+      const key = `live:${cc}:${term}`;
+      if (!appCache.has(key)) appCache.set(key, (await apple.topApps(term, cc)).map((a) => a.id));
+      return lookupApps(appCache.get(key), cc);
     },
     '/api/app': async (q) => {
       const id = Number(q.get('id'));

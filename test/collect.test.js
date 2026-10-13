@@ -84,6 +84,12 @@ test('classificationQueue: reclasifica dupa 30 de zile, scor mare primul', () =>
   assert.deepEqual(classificationQueue(index, today, '2026-10-12'), ['nou', 'vechi']);
 });
 
+test('classificationQueue: cuvintele aparute recent inaintea celor vechi cu scor mare', () => {
+  const index = new Map([['vechi', { firstSeen: '2026-09-01' }], ['ieri', { firstSeen: '2026-10-11' }]]);
+  const today = new Map([['vechi', 90], ['ieri', 20], ['azi', 10]]);
+  assert.deepEqual(classificationQueue(index, today, '2026-10-12'), ['ieri', 'azi', 'vechi']);
+});
+
 test('expansionPrefixes: primul cuvant + spatiu, fara dubluri, cu limita', () => {
   const dates = Array.from({ length: 10 }, (_, i) => addDays('2026-01-01', i));
   const scores = new Map(dates.map((d, i) => [d, new Map(i === 9

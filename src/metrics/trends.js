@@ -23,17 +23,35 @@ export function isConfirmed(series, term, firstSeen) {
   return n >= 2;
 }
 
-// periodDays: 1 = doar ultima zi, 7, 30
+// Zilele complete (de la firstSeen pana la ultima) si in cate dintre ele a fost vazut cuvantul.
+export function seenSince(series, term, firstSeen) {
+  let seen = 0, of = 0;
+  for (const d of series.dates) {
+    if (d < firstSeen) continue;
+    of++;
+    if (series.scores.get(d).has(term)) seen++;
+  }
+  return { seenDays: seen, ofDays: of };
+}
+
+// periodDays: 1 = doar ultima zi, 7, 30.
+// Dupa perioada de pornire: nou = aparut dupa primele 7 zile.
+// In perioada de pornire (>= 2 zile): PRELIMINAR, nou = nevazut in prima zi de colectare.
 export function newTerms(series, index, periodDays) {
   const w = warmup(series.dates);
-  if (!w.done) return [];
+  if (series.dates.length < 2) return [];
+  const baseEnd = w.done ? w.endDate : series.dates[0];
   const latest = series.dates.at(-1);
   const from = addDays(latest, -(periodDays - 1));
   const out = [];
   for (const [term, info] of index) {
     const fs = info.firstSeen;
-    if (!fs || fs <= w.endDate || fs < from || fs > latest) continue;
-    out.push({ term, firstSeen: fs, confirmed: isConfirmed(series, term, fs), score: scoreOn(series, latest, term) });
+    if (!fs || fs <= baseEnd || fs < from || fs > latest) continue;
+    out.push({
+      term, firstSeen: fs, preliminary: !w.done,
+      confirmed: isConfirmed(series, term, fs), ...seenSince(series, term, fs),
+      score: scoreOn(series, latest, term),
+    });
   }
   return out.sort((a, b) => b.score - a.score || (a.firstSeen < b.firstSeen ? 1 : -1));
 }

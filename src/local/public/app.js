@@ -36,6 +36,8 @@ const HELP = {
   confirmed: 'Confirmat = cuvântul a fost văzut din nou în cel puțin încă o zi din prima săptămână. Neconfirmat poate fi zgomot de o zi.',
   firstSeen: 'Prima zi în care cuvântul a apărut în sugestii în această țară, de când colectăm.',
   seenDays: 'În câte din cele 7 zile dinaintea ultimelor 3 a fost văzut.',
+  seenOf: 'În câte zile de colectare (de la prima apariție până azi) a fost văzut cuvântul. 1/1 = abia a apărut. 3/3 = stă constant, semn de trend real. 1/3 = poate fi zgomot.',
+  apps: 'Primele app-uri din căutarea App Store pentru acest cuvânt. Click pe iconiță = pagina aplicației. „în coadă” = cuvântul încă nu a fost clasificat; deschide cuvântul ca să vezi app-urile acum.',
 };
 
 // ---------- stare ----------
@@ -62,16 +64,23 @@ const COLS = {
   confirmed: { label: 'Stare', help: 'confirmed' },
   firstSeen: { label: 'Prima apariție', help: 'firstSeen' },
   seenDays: { label: 'Zile văzut', num: true, help: 'seenDays' },
+  seenOf: { label: 'Văzut', num: true, help: 'seenOf' },
+  apps: { label: 'Aplicații', help: 'apps' },
   lastSeen: { label: 'Ultima dată' },
 };
 const VIEW_COLS = {
-  new: ['term', 'score', 'categoryName', 'difficulty', 'confirmed', 'firstSeen'],
+  new: ['term', 'score', 'apps', 'categoryName', 'difficulty', 'seenOf', 'firstSeen'],
   rising: ['term', 'score', 'then', 'delta', 'categoryName', 'difficulty', 'firstSeen'],
   falling: ['term', 'score', 'then', 'delta', 'categoryName', 'difficulty'],
   top: ['term', 'score', 'categoryName', 'difficulty', 'firstSeen'],
   gone: ['term', 'score', 'seenDays', 'lastSeen', 'categoryName'],
 };
 
+const fmtDay = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString('ro-RO', { day: 'numeric', month: 'short' });
+const ago = (d) => {
+  const n = Math.round((Date.parse(new Date().toISOString().slice(0, 10)) - Date.parse(d)) / 86400000);
+  return n <= 0 ? 'azi' : n === 1 ? 'ieri' : `acum ${n} zile`;
+};
 const diffDots = (d) => (d == null ? '<span class="muted">–</span>' : `<span class="diff">${'●'.repeat(d)}${'○'.repeat(3 - d)}</span>`);
 function cell(col, r) {
   const v = r[col];
@@ -82,6 +91,11 @@ function cell(col, r) {
     case 'then': case 'seenDays': return `<td class="num">${v ?? '–'}</td>`;
     case 'categoryName': return `<td>${esc(v)}${r.subgenreName ? ` <span class="muted">· ${esc(r.subgenreName)}</span>` : ''}</td>`;
     case 'difficulty': return `<td>${diffDots(v)}</td>`;
+    case 'seenOf': return `<td class="num"><span class="badge ${r.seenDays >= 2 ? 'ok' : 'new'}">${r.seenDays}/${r.ofDays} ${r.ofDays === 1 ? 'zi' : 'zile'}</span></td>`;
+    case 'apps': return r.apps?.length
+      ? `<td class="apps-cell" data-ids="${r.apps.join(',')}" data-cc="${r.country}">${r.apps.map(() => '<span class="ico ph"></span>').join('')}</td>`
+      : '<td><span class="muted">în coadă</span></td>';
+    case 'firstSeen': return v ? `<td>${esc(fmtDay(v))} <span class="muted">· ${ago(v)}</span></td>` : '<td>–</td>';
     case 'confirmed': return `<td>${v ? '<span class="badge ok">confirmat</span>' : '<span class="badge new">nou</span>'}</td>`;
     default: return `<td>${esc(v ?? '–')}</td>`;
   }
@@ -138,7 +152,9 @@ function notice(meta) {
   const notes = [];
   if (['new', 'gone'].includes(state.view)) {
     for (const [cc, m] of Object.entries(meta)) {
-      if (!m.warmup.done) notes.push(`${cc}: se adună baza ${m.warmup.count}/7 zile. Până atunci nu putem spune ce e „nou” sau „dispărut”, la început totul ar părea nou.`);
+      if (m.warmup.done) continue;
+      if (state.view === 'new' && m.warmup.count >= 2) notes.push(`${cc}: PRELIMINAR (${m.warmup.count}/7 zile de bază). „Nou” = nu a apărut în prima zi de colectare. Unele pot fi doar fluctuații de o zi: uită-te la coloana „Văzut”. De la 7 zile, lista devine sigură.`);
+      else notes.push(`${cc}: se adună baza ${m.warmup.count}/7 zile. Până atunci nu putem spune ce e „${state.view === 'new' ? 'nou' : 'dispărut'}”${state.view === 'new' ? ' (trebuie minim 2 zile)' : ''}.`);
     }
   }
   if (['rising', 'falling'].includes(state.view) && Object.values(meta).every((m) => !m.latest)) {
@@ -147,6 +163,7 @@ function notice(meta) {
   $('#notice').innerHTML = notes.map((n) => `<div class="notice">${esc(n)}</div>`).join('');
 }
 
+const sortVal = (r, c) => (c === 'seenOf' ? r.seenDays / r.ofDays : c === 'apps' ? (r.apps?.length ?? 0) : r[c]);
 function renderTable() {
   let cols = VIEW_COLS[state.view];
   if (state.country === 'ALL') cols = ['country', ...cols];
@@ -155,7 +172,7 @@ function renderTable() {
   if (state.sort) {
     const { col, dir } = state.sort;
     rows.sort((a, b) => {
-      const x = a[col], y = b[col];
+      const x = sortVal(a, col), y = sortVal(b, col);
       if (x == null) return 1; if (y == null) return -1;
       return (typeof x === 'number' ? x - y : String(x).localeCompare(String(y))) * dir;
     });
@@ -171,6 +188,43 @@ function renderTable() {
        <div class="card"><table><thead><tr>${head}</tr></thead>
        <tbody>${shown.map((r) => `<tr>${cols.map((c) => cell(c, r)).join('')}</tr>`).join('')}</tbody></table></div>`
     : '<div class="card empty">Nimic de afișat pentru filtrele alese.</div>';
+  loadIcons().catch(() => {});
+}
+
+// Iconitele din coloana "Aplicatii": cerute in loturi pe tara, tinute in memorie.
+const appInfo = new Map(); // `${cc}:${id}` -> app
+async function loadIcons() {
+  const cells = [...document.querySelectorAll('.apps-cell')];
+  if (!cells.length) return;
+  const byCc = new Map();
+  for (const c of cells) {
+    for (const id of c.dataset.ids.split(',')) {
+      if (!appInfo.has(`${c.dataset.cc}:${id}`)) {
+        if (!byCc.has(c.dataset.cc)) byCc.set(c.dataset.cc, new Set());
+        byCc.get(c.dataset.cc).add(id);
+      }
+    }
+  }
+  const fill = () => {
+    for (const c of cells) {
+      if (!c.isConnected || c.dataset.done) continue;
+      const apps = c.dataset.ids.split(',').map((id) => appInfo.get(`${c.dataset.cc}:${id}`));
+      if (apps.some((a) => a === undefined)) continue;
+      c.dataset.done = '1';
+      c.innerHTML = apps.filter(Boolean).map((a) => `<a data-app="${a.id}" data-app-country="${c.dataset.cc}" class="applink ico" data-tip="${esc(`${a.name} · ${a.ratings.toLocaleString('ro-RO')} rating-uri`)}"><img src="${esc(a.icon)}" alt="" loading="lazy"></a>`).join('');
+    }
+  };
+  fill();
+  for (const [cc, set] of byCc) {
+    const ids = [...set];
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100);
+      const apps = await api(`/api/apps?ids=${chunk.join(',')}&country=${cc}`);
+      for (const id of chunk) appInfo.set(`${cc}:${id}`, null); // app scos din magazin
+      for (const a of apps) appInfo.set(`${cc}:${a.id}`, a);
+      fill();
+    }
+  }
 }
 
 // Rezultatele listelor raman in memorie: la "Inapoi" lista apare instant, fara recalculare.
@@ -281,10 +335,11 @@ async function showTerm(term) {
   const r = await api(`/api/term?q=${encodeURIComponent(term)}`);
   const seen = r.countries.filter((c) => c.firstSeen);
   const withApps = r.countries.find((c) => c.topAppIds.length);
+  const liveCc = withApps ? null : (r.countries.find((c) => c.country === state.country && c.firstSeen) ?? seen[0])?.country;
   out.innerHTML = `
     <div class="grid2">
       <div class="card panel"><h3>Scor estimat în timp ${q(HELP.score)}</h3><div class="chart" id="kw-chart"></div></div>
-      <div class="card panel"><h3>Primele app-uri ${withApps ? `<span class="muted">(${withApps.country})</span>` : ''}</h3><ul class="apps" id="kw-apps"><li class="muted">${withApps ? 'Se încarcă…' : 'Cuvântul nu e clasificat încă.'}</li></ul></div>
+      <div class="card panel"><h3>Primele app-uri ${withApps ? `<span class="muted">(${withApps.country})</span>` : liveCc ? `<span class="muted">(${liveCc}, căutat acum ${q('Cuvântul nu e clasificat încă, așa că am căutat acum în App Store.')})</span>` : ''}</h3><ul class="apps" id="kw-apps"><li class="muted">${withApps || liveCc ? 'Se încarcă…' : 'Cuvântul nu e clasificat încă.'}</li></ul></div>
     </div>
     <div class="card" style="margin-top:14px"><table><thead><tr>
       <th>Țara</th><th class="num">Scor azi ${q(HELP.score)}</th><th>Apare la</th><th>Categorie ${q(HELP.category)}</th>
@@ -298,11 +353,14 @@ async function showTerm(term) {
         <td>${esc(c.firstSeen ?? '–')}</td><td>${esc(c.lastSeen ?? '–')}</td></tr>`).join('')}</tbody></table></div>
     ${seen.length ? '' : '<div class="notice info" style="margin-top:14px">Cuvântul nu a apărut în sugestiile colectate. Poate fi prea puțin căutat sau e mai lung decât ce prindem (2 litere + extindere).</div>'}`;
   lineChart($('#kw-chart'), r.countries.map((c) => ({ country: c.country, points: c.history })), tip);
-  if (withApps) {
+  if (withApps || liveCc) {
+    const cc = withApps?.country ?? liveCc;
     try {
-      const apps = await api(`/api/apps?ids=${withApps.topAppIds.join(',')}&country=${withApps.country}`);
+      const apps = withApps
+        ? await api(`/api/apps?ids=${withApps.topAppIds.join(',')}&country=${cc}`)
+        : await api(`/api/live-apps?term=${encodeURIComponent(term)}&country=${cc}`);
       $('#kw-apps').innerHTML = apps.map((a, i) => `<li><span class="muted">${i + 1}</span><img src="${esc(a.icon)}" alt="" loading="lazy">
-        <div><a data-app="${a.id}" data-app-country="${withApps.country}" class="applink">${esc(a.name)}</a> <a class="muted ext" href="${esc(a.url)}" target="_blank" rel="noopener" title="Deschide în App Store">↗</a>
+        <div><a data-app="${a.id}" data-app-country="${cc}" class="applink">${esc(a.name)}</a> <a class="muted ext" href="${esc(a.url)}" target="_blank" rel="noopener" title="Deschide în App Store">↗</a>
         <div class="meta">${esc(a.seller)} · ${a.ratings.toLocaleString('ro-RO')} rating-uri${a.rating ? ` · ${a.rating.toFixed(1)}★` : ''}</div></div></li>`).join('');
     } catch (err) {
       $('#kw-apps').innerHTML = `<li class="muted">Nu am putut încărca app-urile: ${esc(err.message)}</li>`;

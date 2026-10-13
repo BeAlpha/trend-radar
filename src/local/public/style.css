@@ -127,3 +127,10 @@ td.term a:hover { text-decoration: underline; }
 .badge.src-title, .badge.src-subtitle, .badge.src-both { background: #16301f; color: #8fe0b2; }
 .badge.src-partial { background: #3a2c12; color: #f3c46d; }
 .badge.src-hidden { background: #2d1f3f; color: #cdb6f5; }
+
+/* Iconitele app-urilor in tabelul "Nou" */
+.apps-cell { white-space: nowrap; }
+.ico { display: inline-block; width: 28px; height: 28px; border-radius: 7px; margin-right: 4px; vertical-align: middle; overflow: hidden; }
+.ico img { width: 28px; height: 28px; display: block; }
+.ico.ph { background: rgba(127, 127, 127, 0.18); }
+a.ico:hover { outline: 2px solid currentColor; outline-offset: 1px; }

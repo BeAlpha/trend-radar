@@ -27,7 +27,7 @@ export function loadIndex(db, cc) {
   }
   for (const r of db.prepare('SELECT * FROM class WHERE country=?').all(cc)) {
     const e = index.get(r.term);
-    if (e) Object.assign(e, { category: r.category, subgenre: r.subgenre, difficulty: r.difficulty });
+    if (e) Object.assign(e, { category: r.category, subgenre: r.subgenre, difficulty: r.difficulty, topAppIds: JSON.parse(r.top_app_ids) });
   }
   return index;
 }
@@ -42,7 +42,7 @@ export function makeViews(db) {
     return cache.get(key);
   };
 
-  const enrich = (cc, index, r) => {
+  const enrich = (cc, index, r, withApps = false) => {
     const i = index.get(r.term) ?? {};
     return {
       country: cc, ...r,
@@ -51,6 +51,7 @@ export function makeViews(db) {
       categoryName: i.category == null ? 'Neclasificat' : genreName(i.category),
       subgenreName: i.subgenre ? genreName(i.subgenre) : null,
       difficulty: i.difficulty ?? null,
+      ...(withApps ? { apps: (i.topAppIds ?? []).slice(0, 3) } : {}),
     };
   };
 
@@ -74,7 +75,7 @@ export function makeViews(db) {
       else if (name === 'falling') list = falling(series, p >= 30 ? 30 : 7);
       else if (name === 'gone') list = disappeared(series);
       else list = topTerms(series);
-      rows.push(...list.map((r) => enrich(cc, index, r)));
+      rows.push(...list.map((r) => enrich(cc, index, r, name === 'new')));
     }
     rows = rows.filter(matchCategory(category));
     return { total: rows.length, rows: rows.slice(0, limit), meta };

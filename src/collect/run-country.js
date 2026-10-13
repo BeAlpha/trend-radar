@@ -10,6 +10,7 @@ import {
 } from '../data/files.js';
 import { addDays } from '../util/dates.js';
 
+const NEW_PRIORITY_DAYS = 7;
 export const RECLASSIFY_DAYS = 30;
 export const MAX_FAILURE_RATE = 0.1;
 
@@ -29,11 +30,14 @@ export function expansionPrefixes(series, index, max) {
 }
 
 // Cuvintele vazute azi, fara clasificare sau clasificate acum >30 zile; scor mare primele.
+// Cuvintele aparute recent (sau azi, inca neindexate) primele: pentru ele vrem app-urile cat mai repede.
 export function classificationQueue(index, todayScores, date) {
   const stale = addDays(date, -RECLASSIFY_DAYS);
+  const recent = addDays(date, -NEW_PRIORITY_DAYS);
+  const isNew = (t) => { const fs = index.get(t)?.firstSeen; return !fs || fs >= recent; };
   return [...todayScores.keys()]
     .filter((t) => { const c = index.get(t)?.classifiedAt; return !c || c <= stale; })
-    .sort((a, b) => todayScores.get(b) - todayScores.get(a));
+    .sort((a, b) => isNew(b) - isNew(a) || todayScores.get(b) - todayScores.get(a));
 }
 
 export async function runCountry({
