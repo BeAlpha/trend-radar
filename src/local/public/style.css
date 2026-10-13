@@ -104,3 +104,26 @@ td.term a:hover { text-decoration: underline; }
 .empty { padding: 40px; text-align: center; color: var(--text-muted); }
 @media (max-width: 1000px) { .grid2 { grid-template-columns: 1fr; } }
 .back { margin-bottom: 14px; }
+.applink { cursor: pointer; text-decoration: underline; text-decoration-color: #555; }
+.applink:hover { text-decoration-color: currentColor; }
+.ext { text-decoration: none; font-size: 12px; }
+.small { font-size: 12px; }
+.app-head { display: flex; gap: 18px; align-items: flex-start; }
+.app-icon { width: 96px; height: 96px; border-radius: 22px; flex: none; }
+.app-titles h2 { margin: 0 0 4px; font-size: 22px; }
+.app-titles h2 span, .app-sub span { font-size: 12px; font-weight: 400; margin-left: 6px; }
+.app-sub { font-size: 15px; color: var(--text-secondary); margin-bottom: 6px; }
+.app-stats { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 10px 0; color: var(--text-secondary); font-size: 13px; }
+.app-country { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--text-muted); }
+.chip { background: var(--surface-2); color: var(--text-secondary); border: 1px solid var(--line); border-radius: 99px; padding: 3px 10px; font-size: 12px; font-weight: 600; }
+.chip.on { background: #1f3550; color: #bcd6f7; border-color: #23406a; }
+.panel-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px 6px; }
+.panel-head h3 { margin: 0; font-size: 14px; }
+.desc { color: var(--text-secondary); font-size: 13px; max-height: 420px; overflow: auto; white-space: normal; }
+.desc.short { max-height: 160px; }
+.shots { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; }
+.shots img { height: 380px; border-radius: 14px; flex: none; }
+.hidden-kw { border-top: 1px solid var(--line); font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.badge.src-title, .badge.src-subtitle, .badge.src-both { background: #16301f; color: #8fe0b2; }
+.badge.src-partial { background: #3a2c12; color: #f3c46d; }
+.badge.src-hidden { background: #2d1f3f; color: #cdb6f5; }

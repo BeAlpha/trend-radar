@@ -68,3 +68,10 @@ test('client.suggest trimite storefront-ul tarii', async () => {
   assert.match(seen.url, /term=ai$/);
   assert.equal(apple.counter.stats.requests, 1);
 });
+
+test('parseSubtitle: primul subtitlu din pagina (antetul app-ului)', async () => {
+  const { parseSubtitle } = await import('../src/apple/clients.js');
+  const html = '<h1>X</h1><h2 class="subtitle svelte-kps97o">Explore, build &amp; craft</h2><p class="subtitle svelte-1">Altceva</p>';
+  assert.equal(parseSubtitle(html), 'Explore, build & craft');
+  assert.equal(parseSubtitle('<html></html>'), null);
+});

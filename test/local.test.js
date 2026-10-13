@@ -71,3 +71,12 @@ test('fisier stricat => apare la probleme, restul se importa', () => {
   assert.equal(s.days, 11);
   assert.equal(makeViews(db).status().problems[0].error, 'corrupt');
 });
+
+test('appKeywords: cuvintele unde app-ul e in top 10, cu pozitie si scor', () => {
+  const dir = fixture();
+  const db = openDb();
+  importAll(db, dir);
+  const v = makeViews(db);
+  assert.deepEqual(v.appKeywords(8).map((k) => [k.country, k.term, k.position, k.score]), [['US', 'ai baby', 2, 100]]);
+  assert.deepEqual(v.appKeywords(80), []); // 80 nu trebuie sa se potriveasca cu 8
+});

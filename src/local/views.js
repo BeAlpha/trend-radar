@@ -137,6 +137,26 @@ export function makeViews(db) {
     return { term: t, countries: perCountry };
   }
 
+  // Cuvintele pe care app-ul apare in primele 10 (din clasificarile noastre), pe tari.
+  function appKeywords(appId) {
+    const id = String(Number(appId));
+    const out = [];
+    for (const cc of COUNTRIES) {
+      const latest = db.prepare('SELECT MAX(date) d FROM days WHERE country=? AND complete=1').get(cc).d;
+      const rows = db.prepare(`SELECT c.term, c.top_app_ids, c.classified_at, c.category, s.score
+        FROM class c LEFT JOIN scores s ON s.country=c.country AND s.term=c.term AND s.date=?
+        WHERE c.country=? AND instr(',' || substr(c.top_app_ids, 2, length(c.top_app_ids) - 2) || ',', ',' || ? || ',') > 0`)
+        .all(latest, cc, id);
+      for (const r of rows) {
+        const position = JSON.parse(r.top_app_ids).map(String).indexOf(id) + 1;
+        if (position > 0) {
+          out.push({ country: cc, term: r.term, position, score: r.score ?? 0, classifiedAt: r.classified_at, categoryName: genreName(r.category) });
+        }
+      }
+    }
+    return out.sort((a, b) => b.score - a.score || a.position - b.position);
+  }
+
   function suggestTerms(q) {
     return db.prepare('SELECT DISTINCT term FROM seen WHERE term LIKE ? ORDER BY length(term) LIMIT 15')
       .all(`${q.trim().toLowerCase()}%`).map((r) => r.term);
@@ -166,7 +186,7 @@ export function makeViews(db) {
   }
 
   return {
-    view, themeView, termView, suggestTerms, categories, status,
+    view, themeView, termView, suggestTerms, appKeywords, categories, status,
     invalidate: () => { version++; cache.clear(); },
   };
 }

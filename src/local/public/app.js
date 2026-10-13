@@ -47,8 +47,9 @@ const VIEWS = {
   gone: { title: 'Dispărute', periods: null },
   themes: { title: 'Teme topuri', periods: null },
   search: { title: 'Caută kw', periods: null },
+  app: { title: 'Aplicație', periods: null },
 };
-const state = { view: 'new', country: 'US', category: 'all', period: 7, text: '', sort: null, rows: [], term: '' };
+const state = { view: 'new', country: 'US', category: 'all', period: 7, text: '', sort: null, rows: [], term: '', appId: null, appCountry: 'US', appKwAll: false };
 
 const COLS = {
   country: { label: 'Țara' },
@@ -121,7 +122,7 @@ async function loadMeta() {
 function setupFilters() {
   const v = VIEWS[state.view];
   const isTable = !!VIEW_COLS[state.view];
-  $('#filters').style.display = state.view === 'search' ? 'none' : '';
+  $('#filters').style.display = ['search', 'app'].includes(state.view) ? 'none' : '';
   $('#f-period-wrap').style.display = v.periods ? '' : 'none';
   $('#f-text').style.display = isTable ? '' : 'none';
   $('#csv').style.display = isTable ? '' : 'none';
@@ -180,6 +181,7 @@ async function renderView(scrollY = 0) {
   syncControls();
   $('#notice').innerHTML = '';
   if (state.view === 'search') { renderSearch(); return window.scrollTo(0, 0); }
+  if (state.view === 'app') { await renderApp(); return window.scrollTo(0, scrollY); }
   if (state.view === 'themes') { await renderThemes(); return window.scrollTo(0, scrollY); }
   const params = new URLSearchParams({ name: state.view, country: state.country, category: state.category, period: state.period });
   const key = params.toString();
@@ -199,6 +201,7 @@ history.scrollRestoration = 'manual';
 const snapshot = () => ({
   view: state.view, country: state.country, category: state.category, period: state.period,
   term: state.term, text: state.text, sort: state.sort, from: state.from ?? null,
+  appId: state.appId, appCountry: state.appCountry, appKwAll: state.appKwAll,
 });
 // Pagina noua: memoram unde eram (inclusiv scroll-ul) in intrarea curenta, apoi adaugam una noua.
 function navigate(changes) {
@@ -235,7 +238,7 @@ async function renderThemes() {
       <div class="sub">${g.movers.length} app-uri noi sau în urcare · ${g.date}</div>
       ${g.themes.slice(0, 8).map((t) => `
         <details class="theme"><summary><b>${esc(t.theme)}</b><span class="muted">${t.count} app-uri</span></summary>
-          <ul>${t.apps.map((a) => `<li>${esc(a.name)} <span class="muted">· #${a.rank} ${a.kind === 'new' ? 'nou intrat' : `↑${a.climb}`} · ${a.type === 'toppaidapplications' ? 'plătite' : 'gratuite'}</span></li>`).join('')}</ul>
+          <ul>${t.apps.map((a) => `<li><a data-app="${a.id}" data-app-country="${g.country}" class="applink">${esc(a.name)}</a> <span class="muted">· #${a.rank} ${a.kind === 'new' ? 'nou intrat' : `↑${a.climb}`} · ${a.type === 'toppaidapplications' ? 'plătite' : 'gratuite'}</span></li>`).join('')}</ul>
         </details>`).join('') || '<div class="muted">Nicio temă comună (minim 2 app-uri).</div>'}
       ${g.movers.length ? `<div class="movers">Mișcări: ${g.movers.slice(0, 6).map((m) => esc(m.name)).join(' · ')}${g.movers.length > 6 ? ' …' : ''}</div>` : ''}
     </div>`).join('')}</div>`;
@@ -299,12 +302,95 @@ async function showTerm(term) {
     try {
       const apps = await api(`/api/apps?ids=${withApps.topAppIds.join(',')}&country=${withApps.country}`);
       $('#kw-apps').innerHTML = apps.map((a, i) => `<li><span class="muted">${i + 1}</span><img src="${esc(a.icon)}" alt="" loading="lazy">
-        <div><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
+        <div><a data-app="${a.id}" data-app-country="${withApps.country}" class="applink">${esc(a.name)}</a> <a class="muted ext" href="${esc(a.url)}" target="_blank" rel="noopener" title="Deschide în App Store">↗</a>
         <div class="meta">${esc(a.seller)} · ${a.ratings.toLocaleString('ro-RO')} rating-uri${a.rating ? ` · ${a.rating.toFixed(1)}★` : ''}</div></div></li>`).join('');
     } catch (err) {
       $('#kw-apps').innerHTML = `<li class="muted">Nu am putut încărca app-urile: ${esc(err.message)}</li>`;
     }
   }
+}
+
+// ---------- Pagina aplicatiei ----------
+const SOURCE = {
+  title: ['titlu', 'Toate cuvintele sunt în titlu.'],
+  subtitle: ['subtitlu', 'Toate cuvintele sunt în subtitlu.'],
+  both: ['titlu + subtitlu', 'Cuvintele sunt împărțite între titlu și subtitlu.'],
+  partial: ['parțial', 'Doar o parte din cuvinte sunt în titlu/subtitlu; restul vin probabil din câmpul ascuns de keywords.'],
+  hidden: ['ascuns', 'Niciun cuvânt nu e în titlu sau subtitlu: aproape sigur e în câmpul ascuns de keywords (100 caractere) al aplicației.'],
+};
+const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('ro-RO', { day: 'numeric', month: 'short', year: 'numeric' }) : '–');
+const fmtSize = (b) => (b ? `${(b / 1048576).toFixed(0)} MB` : '–');
+const chars = (s, max) => `<span class="${(s ?? '').length > max ? 'down' : 'muted'}">${(s ?? '').length}/${max}</span>`;
+const multiline = (s) => esc(s).replace(/\n/g, '<br>');
+
+async function renderApp() {
+  const backLabel = state.from ? `← Înapoi la ${esc(VIEWS[state.from]?.title ?? 'listă')}` : '← Înapoi';
+  const back = `<button type="button" class="btn ghost back" id="back">${backLabel}</button>`;
+  $('#content').innerHTML = `${back}<div class="empty">Se încarcă aplicația…</div>`;
+  $('#back').addEventListener('click', () => history.back());
+  const r = await api(`/api/app?id=${state.appId}&country=${state.appCountry}`);
+  const d = r.detail;
+  if (!d) {
+    $('#content').innerHTML = `${back}<div class="card empty">Aplicația nu e disponibilă în ${esc(r.country)}. Încearcă altă țară: ${countryChips()}</div>`;
+    return bindApp();
+  }
+  const kws = state.appKwAll ? r.keywords : r.keywords.filter((k) => k.country === r.country);
+  const hiddenWords = [...new Set(r.keywords.filter((k) => k.country === r.country && k.source === 'hidden').flatMap((k) => k.term.split(' ')))];
+  $('#content').innerHTML = `${back}
+    <div class="card panel app-head">
+      <img src="${esc(d.icon)}" alt="" class="app-icon">
+      <div class="app-titles">
+        <h2>${esc(d.name)} ${chars(d.name, 30)}</h2>
+        <div class="app-sub">${d.subtitle ? `${esc(d.subtitle)} ${chars(d.subtitle, 30)}` : '<span class="muted">fără subtitlu (sau indisponibil)</span>'}</div>
+        <div class="muted"><a href="${esc(d.sellerUrl)}" target="_blank" rel="noopener">${esc(d.seller)}</a> · ${esc(d.genres.join(', '))}</div>
+        <div class="app-stats">
+          <span><b>${d.rating ? d.rating.toFixed(1) : '–'}★</b> ${d.ratings.toLocaleString('ro-RO')} rating-uri</span>
+          <span><b>${esc(d.price || '–')}</b></span>
+          <span>v${esc(d.version)} · actualizat ${fmtDate(d.updated)}</span>
+          <span>lansat ${fmtDate(d.released)}</span>
+          <span>${fmtSize(d.sizeBytes)} · iOS ${esc(d.minOs)}+ · ${esc(d.ageRating)}</span>
+        </div>
+        <div class="app-country">Metadata din: ${countryChips()} <a class="muted" href="${esc(d.url)}" target="_blank" rel="noopener">App Store ↗</a></div>
+      </div>
+    </div>
+
+    <div class="grid2" style="margin-top:14px">
+      <div class="card">
+        <div class="panel-head">
+          <h3>Cuvinte pe care apare în top 10 ${q('Din datele noastre: pentru fiecare cuvânt clasificat am salvat primele 10 app-uri din căutare. Arată doar cuvintele din colecția noastră care au fost clasificate (se completează zilnic), nu toate cuvintele posibile.')}</h3>
+          <label class="muted small"><input type="checkbox" id="kw-all" ${state.appKwAll ? 'checked' : ''}> toate țările</label>
+        </div>
+        ${kws.length ? `<table><thead><tr>${state.appKwAll ? '<th>Țara</th>' : ''}<th>Cuvânt</th><th class="num">Poziție</th>
+          <th class="num">Scor* ${q(HELP.score)}</th><th>Sursă ${q('De unde vine cuvântul pentru această aplicație: titlu, subtitlu sau câmpul ascuns de keywords. Se calculează doar pentru țara metadatelor afișate.')}</th></tr></thead>
+          <tbody>${kws.map((k) => `<tr>${state.appKwAll ? `<td>${k.country}</td>` : ''}
+            <td class="term"><a data-term="${esc(k.term)}">${esc(k.term)}</a></td>
+            <td class="num">#${k.position}</td>
+            <td class="num">${k.score}<span class="scorebar"><i style="width:${k.score}%"></i></span></td>
+            <td>${k.source ? `<span class="badge src-${k.source}" data-tip="${esc(SOURCE[k.source][1])}">${SOURCE[k.source][0]}</span>` : '<span class="muted">–</span>'}</td></tr>`).join('')}</tbody></table>`
+          : `<div class="empty">Nu apare în top 10 la niciun cuvânt clasificat încă${state.appKwAll ? '' : ` în ${esc(r.country)}`}. Clasificarea se completează zilnic.</div>`}
+        ${hiddenWords.length ? `<div class="panel hidden-kw"><b>Probabil în câmpul ascuns de keywords:</b> ${hiddenWords.map((w) => `<span class="badge">${esc(w)}</span>`).join(' ')}</div>` : ''}
+      </div>
+      <div class="card panel">
+        <h3>Descriere</h3>
+        <div class="desc">${multiline(d.description)}</div>
+        ${d.releaseNotes ? `<h3 style="margin-top:14px">Noutăți (v${esc(d.version)})</h3><div class="desc short">${multiline(d.releaseNotes)}</div>` : ''}
+        <div class="muted small" style="margin-top:12px">Limbi: ${esc(d.languages.join(', '))} · Bundle: ${esc(d.bundleId)}</div>
+      </div>
+    </div>
+    ${d.screenshots.length ? `<div class="card panel" style="margin-top:14px"><h3>Screenshot-uri</h3><div class="shots">${d.screenshots.map((u) => `<img src="${esc(u)}" alt="" loading="lazy">`).join('')}</div></div>` : ''}`;
+  bindApp();
+}
+
+function countryChips() {
+  return ['US', 'GB', 'DE', 'FR', 'IT', 'ES'].map((c) => `<button type="button" class="chip ${c === state.appCountry ? 'on' : ''}" data-cc="${c}">${c}</button>`).join('');
+}
+
+function bindApp() {
+  $('#back')?.addEventListener('click', () => history.back());
+  document.querySelectorAll('.chip[data-cc]').forEach((b) => b.addEventListener('click', () => {
+    state.appCountry = b.dataset.cc; remember(); renderApp().catch(showError);
+  }));
+  $('#kw-all')?.addEventListener('change', (e) => { state.appKwAll = e.target.checked; remember(); renderApp().catch(showError); });
 }
 
 // ---------- evenimente ----------
@@ -327,7 +413,9 @@ $('#content').addEventListener('click', (e) => {
     return remember();
   }
   const t = e.target.closest('a[data-term]')?.dataset.term;
-  if (t) navigate({ term: t, view: 'search', from: state.view });
+  if (t) return navigate({ term: t, view: 'search', from: state.view });
+  const appEl = e.target.closest('a[data-app]');
+  if (appEl) navigate({ view: 'app', appId: Number(appEl.dataset.app), appCountry: appEl.dataset.appCountry, appKwAll: false, from: state.view });
 });
 $('#refresh').addEventListener('click', async (e) => {
   const b = e.target; b.disabled = true; b.textContent = 'Se descarcă…';

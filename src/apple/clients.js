@@ -56,6 +56,29 @@ export function parseLookup(json) {
   }));
 }
 
+// Metadata completa a unui app (iTunes Lookup).
+export function parseAppDetail(r) {
+  if (!r) return null;
+  return {
+    id: r.trackId, name: r.trackName ?? '', seller: r.sellerName ?? r.artistName ?? '',
+    sellerUrl: r.artistViewUrl ?? '', url: r.trackViewUrl ?? '', bundleId: r.bundleId ?? '',
+    icon: r.artworkUrl512 ?? r.artworkUrl100 ?? '', description: r.description ?? '',
+    releaseNotes: r.releaseNotes ?? '', version: r.version ?? '',
+    updated: r.currentVersionReleaseDate ?? null, released: r.releaseDate ?? null,
+    price: r.formattedPrice ?? '', genres: r.genres ?? [], primaryGenreId: Number(r.primaryGenreId),
+    rating: r.averageUserRating ?? null, ratings: r.userRatingCount ?? 0,
+    ageRating: r.trackContentRating ?? r.contentAdvisoryRating ?? '',
+    languages: r.languageCodesISO2A ?? [], sizeBytes: Number(r.fileSizeBytes) || null,
+    minOs: r.minimumOsVersion ?? '', screenshots: r.screenshotUrls ?? [], ipadScreenshots: r.ipadScreenshotUrls ?? [],
+  };
+}
+
+// Subtitlul nu e in Lookup: il luam din pagina web App Store (primul element "subtitle" = antetul app-ului).
+export function parseSubtitle(html) {
+  const m = /class="subtitle[^"]*"[^>]*>([^<]+)</.exec(html);
+  return m ? decodeXml(m[1]).trim() : null;
+}
+
 // Throttle-uri separate: hints/RSS tolereaza ~50/min, iTunes Search ~20/min.
 export function makeAppleClient({
   fetchImpl = fetch,
@@ -89,6 +112,19 @@ export function makeAppleClient({
     chart(country, type, genreId) {
       const url = `https://itunes.apple.com/${country.toLowerCase()}/rss/${type}/limit=100/genre=${genreId}/json`;
       return call(light, 'rss', url, {}, async (r) => parseChart(await r.json()));
+    },
+    async appDetail(id, country) {
+      const url = `https://itunes.apple.com/lookup?id=${id}&country=${country.toLowerCase()}`;
+      const detail = await call(heavy, 'lookup', url, {}, async (r) => parseAppDetail((await r.json()).results?.[0]));
+      if (!detail) return null;
+      try {
+        const res = await fetchImpl(`https://apps.apple.com/${country.toLowerCase()}/app/id${id}`,
+          { headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 Safari/605.1.15' } });
+        detail.subtitle = res.ok ? parseSubtitle(await res.text()) : null;
+      } catch {
+        detail.subtitle = null; // pagina web e optionala; restul metadatelor raman
+      }
+      return detail;
     },
     lookup(ids, country) {
       const url = `https://itunes.apple.com/lookup?id=${ids.join(',')}&country=${country.toLowerCase()}`;

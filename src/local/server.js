@@ -8,6 +8,7 @@ import { importAll } from './db.js';
 import { makeAppleClient, COUNTRIES } from '../apple/clients.js';
 import { makeRetry } from '../apple/net.js';
 import { genreName } from '../apple/genres.js';
+import { keywordSource } from '../metrics/appwords.js';
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
@@ -52,6 +53,18 @@ export function createServer({ db, dataDir, refresh = async () => ({}), apple = 
       const ids = (q.get('ids') ?? '').split(',').map(Number).filter(Boolean).slice(0, 10);
       const cc = COUNTRIES.includes(q.get('country')) ? q.get('country') : 'US';
       return ids.length ? lookupApps(ids, cc) : [];
+    },
+    '/api/app': async (q) => {
+      const id = Number(q.get('id'));
+      const cc = COUNTRIES.includes(q.get('country')) ? q.get('country') : 'US';
+      if (!id) throw new Error('id lipsa');
+      const key = `detail:${cc}:${id}`;
+      if (!appCache.has(key)) appCache.set(key, await apple.appDetail(id, cc));
+      const detail = appCache.get(key);
+      const keywords = views.appKeywords(id).map((k) => ({
+        ...k, source: detail && k.country === cc ? keywordSource(k.term, detail.name, detail.subtitle) : null,
+      }));
+      return { country: cc, detail, keywords };
     },
     '/api/genre': (q) => ({ name: genreName(Number(q.get('id'))) }),
   };
