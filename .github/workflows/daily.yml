@@ -2,7 +2,9 @@ name: daily-collect
 
 on:
   schedule:
-    - cron: '0 4 * * *'   # zilnic 04:00 UTC
+    # Minute "ciudate": GitHub sare uneori programarile la ora fixa (:00) cand e aglomerat.
+    - cron: '17 3 * * *'   # principal
+    - cron: '47 6 * * *'   # rezerva: ruleaza doar daca ziua nu a fost deja colectata
   workflow_dispatch:
     inputs:
       smoke:
@@ -22,12 +24,24 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       date: ${{ steps.d.outputs.date }}
+      skip: ${{ steps.d.outputs.skip }}
     steps:
+      - uses: actions/checkout@v5
       - id: d
-        run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+        run: |
+          D=$(date -u +%F)
+          echo "date=$D" >> "$GITHUB_OUTPUT"
+          # La rularea programata, sarim daca ziua e deja colectata complet (de o rulare anterioara).
+          if [ "${{ github.event_name }}" = "schedule" ] && [ -f "data/days/$D/US.json.gz" ] \
+             && zcat "data/days/$D/US.json.gz" | grep -q '"complete":true'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"; echo "Ziua $D e deja colectata."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
 
   collect:
     needs: plan
+    if: needs.plan.outputs.skip != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 330
     strategy:
@@ -52,7 +66,7 @@ jobs:
 
   commit:
     needs: [plan, collect]
-    if: always() && needs.plan.result == 'success'
+    if: always() && needs.plan.result == 'success' && needs.plan.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
