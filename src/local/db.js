@@ -22,12 +22,19 @@ CREATE TABLE IF NOT EXISTS charts (country TEXT, date TEXT, type TEXT, genre_id 
   app_id INTEGER, name TEXT, app_genre INTEGER);
 CREATE INDEX IF NOT EXISTS charts_cd ON charts (country, date);
 CREATE TABLE IF NOT EXISTS problems (path TEXT PRIMARY KEY, error TEXT);
+CREATE TABLE IF NOT EXISTS queried (country TEXT, date TEXT, prefix TEXT, PRIMARY KEY (country, prefix, date));
 `;
+// 2 = tabela `queried` (inceputurile de extindere intrebate in fiecare zi).
+const SCHEMA_VERSION = 2;
 
 export function openDb(file = ':memory:') {
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
   db.exec(SCHEMA);
+  // Baza mai veche: fisierele deja importate nu au completat tabelele noi -> reimportam tot.
+  if (db.prepare('PRAGMA user_version').get().user_version < SCHEMA_VERSION) {
+    db.exec(`DELETE FROM imported; PRAGMA user_version = ${SCHEMA_VERSION}`);
+  }
   return db;
 }
 
@@ -40,6 +47,9 @@ function importDay(db, day) {
   const { country: cc, date } = day;
   db.prepare('DELETE FROM scores WHERE country=? AND date=?').run(cc, date);
   db.prepare('DELETE FROM charts WHERE country=? AND date=?').run(cc, date);
+  db.prepare('DELETE FROM queried WHERE country=? AND date=?').run(cc, date);
+  const insQueried = db.prepare('INSERT OR IGNORE INTO queried VALUES (?,?,?)');
+  for (const s of day.suggest ?? []) if (s.kind === 'expand') insQueried.run(cc, date, s.prefix);
   db.prepare('INSERT OR REPLACE INTO days VALUES (?,?,?,?,?)')
     .run(cc, date, day.complete ? 1 : 0, day.requests ?? 0, day.errors ?? 0);
   const insScore = db.prepare('INSERT INTO scores VALUES (?,?,?,?,?,?)');

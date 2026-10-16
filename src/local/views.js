@@ -61,7 +61,18 @@ export function makeViews(db) {
     return r.category === Number(category);
   };
 
-  function view({ name, country = 'US', category = 'all', period = 7, limit = MAX_ROWS }) {
+  // Cuvant nou: "appeared" = aparut in sugestiile de baza (1-2 litere) sau intr-o extindere pe care o mai
+  // intrebasem inainte si nu era acolo; "discovered" = gasit la prima intrebare a unei extinderi
+  // (nou pentru noi, nu neaparat pentru lume).
+  const firstObs = db.prepare('SELECT prefix FROM scores WHERE country=? AND date=? AND term=?');
+  const askedBefore = db.prepare('SELECT 1 FROM queried WHERE country=? AND prefix=? AND date<? LIMIT 1');
+  function origin(cc, term, firstSeen) {
+    const prefix = firstObs.get(cc, firstSeen, term)?.prefix;
+    if (prefix == null || [...prefix].length <= 2) return 'appeared';
+    return askedBefore.get(cc, prefix, firstSeen) ? 'appeared' : 'discovered';
+  }
+
+  function view({ name, country = 'US', category = 'all', period = 7, origin: only = 'all', limit = MAX_ROWS }) {
     const ccs = country === 'ALL' ? COUNTRIES : [country];
     const p = Number(period) || 7;
     let rows = [];
@@ -70,7 +81,10 @@ export function makeViews(db) {
       const { series, index } = ctx(cc);
       meta[cc] = { warmup: warmup(series.dates), latest: series.dates.at(-1) ?? null };
       let list;
-      if (name === 'new') list = newTerms(series, index, p);
+      if (name === 'new') {
+        list = newTerms(series, index, p).map((r) => ({ ...r, origin: origin(cc, r.term, r.firstSeen) }));
+        if (only === 'appeared' || only === 'discovered') list = list.filter((r) => r.origin === only);
+      }
       else if (name === 'rising') list = rising(series, p >= 30 ? 30 : 7);
       else if (name === 'falling') list = falling(series, p >= 30 ? 30 : 7);
       else if (name === 'gone') list = disappeared(series);

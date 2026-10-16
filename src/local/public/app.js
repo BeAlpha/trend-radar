@@ -37,6 +37,7 @@ const HELP = {
   firstSeen: 'Prima zi în care cuvântul a apărut în sugestii în această țară, de când colectăm.',
   seenDays: 'În câte din cele 7 zile dinaintea ultimelor 3 a fost văzut.',
   seenOf: 'În câte zile de colectare (de la prima apariție până azi) a fost văzut cuvântul. 1/1 = abia a apărut. 3/3 = stă constant, semn de trend real. 1/3 = poate fi zgomot.',
+  origin: 'Apărut = cuvântul a ieșit nou în sugestiile principale (după 1–2 litere) sau într-o căutare mai adâncă pe care o mai făcusem înainte și unde nu era. Acesta e trendul real. Descoperit = găsit prima dată când am căutat mai adânc după un cuvânt (ex. „ai photo …”): e nou pentru noi, dar lumea îl putea căuta și înainte.',
   apps: 'Primele app-uri din căutarea App Store pentru acest cuvânt. Click pe iconiță = pagina aplicației. „în coadă” = cuvântul încă nu a fost clasificat; deschide cuvântul ca să vezi app-urile acum.',
 };
 
@@ -51,7 +52,7 @@ const VIEWS = {
   search: { title: 'Caută kw', periods: null },
   app: { title: 'Aplicație', periods: null },
 };
-const state = { view: 'new', country: 'US', category: 'all', period: 7, text: '', sort: null, rows: [], term: '', appId: null, appCountry: 'US', appKwAll: false };
+const state = { view: 'new', country: 'US', category: 'all', period: 7, origin: 'appeared', text: '', sort: null, rows: [], term: '', appId: null, appCountry: 'US', appKwAll: false };
 
 const COLS = {
   country: { label: 'Țara' },
@@ -66,10 +67,11 @@ const COLS = {
   seenDays: { label: 'Zile văzut', num: true, help: 'seenDays' },
   seenOf: { label: 'Văzut', num: true, help: 'seenOf' },
   apps: { label: 'Aplicații', help: 'apps' },
+  origin: { label: 'Tip', help: 'origin' },
   lastSeen: { label: 'Ultima dată' },
 };
 const VIEW_COLS = {
-  new: ['term', 'score', 'apps', 'categoryName', 'difficulty', 'seenOf', 'firstSeen'],
+  new: ['term', 'score', 'apps', 'origin', 'categoryName', 'difficulty', 'seenOf', 'firstSeen'],
   rising: ['term', 'score', 'then', 'delta', 'categoryName', 'difficulty', 'firstSeen'],
   falling: ['term', 'score', 'then', 'delta', 'categoryName', 'difficulty'],
   top: ['term', 'score', 'categoryName', 'difficulty', 'firstSeen'],
@@ -91,6 +93,7 @@ function cell(col, r) {
     case 'then': case 'seenDays': return `<td class="num">${v ?? '–'}</td>`;
     case 'categoryName': return `<td>${esc(v)}${r.subgenreName ? ` <span class="muted">· ${esc(r.subgenreName)}</span>` : ''}</td>`;
     case 'difficulty': return `<td>${diffDots(v)}</td>`;
+    case 'origin': return `<td>${v === 'discovered' ? '<span class="badge">descoperit</span>' : '<span class="badge ok">apărut</span>'}</td>`;
     case 'seenOf': return `<td class="num"><span class="badge ${r.seenDays >= 2 ? 'ok' : 'new'}">${r.seenDays}/${r.ofDays} ${r.ofDays === 1 ? 'zi' : 'zile'}</span></td>`;
     case 'apps': return r.apps?.length
       ? `<td class="apps-cell" data-ids="${r.apps.join(',')}" data-cc="${r.country}">${r.apps.map(() => '<span class="ico ph"></span>').join('')}</td>`
@@ -138,6 +141,7 @@ function setupFilters() {
   const isTable = !!VIEW_COLS[state.view];
   $('#filters').style.display = ['search', 'app'].includes(state.view) ? 'none' : '';
   $('#f-period-wrap').style.display = v.periods ? '' : 'none';
+  $('#f-origin-wrap').style.display = state.view === 'new' ? '' : 'none';
   $('#f-text').style.display = isTable ? '' : 'none';
   $('#csv').style.display = isTable ? '' : 'none';
   if (v.periods) {
@@ -145,7 +149,7 @@ function setupFilters() {
     if (!v.periods.some(([val]) => val === state.period)) state.period = v.def;
     $('#f-period').value = state.period;
   }
-  $('#csv').href = `/api/csv?${new URLSearchParams({ name: state.view, country: state.country, category: state.category, period: state.period })}`;
+  $('#csv').href = `/api/csv?${new URLSearchParams({ name: state.view, country: state.country, category: state.category, period: state.period, origin: state.origin })}`;
 }
 
 function notice(meta) {
@@ -237,7 +241,7 @@ async function renderView(scrollY = 0) {
   if (state.view === 'search') { renderSearch(); return window.scrollTo(0, 0); }
   if (state.view === 'app') { await renderApp(); return window.scrollTo(0, scrollY); }
   if (state.view === 'themes') { await renderThemes(); return window.scrollTo(0, scrollY); }
-  const params = new URLSearchParams({ name: state.view, country: state.country, category: state.category, period: state.period });
+  const params = new URLSearchParams({ name: state.view, country: state.country, category: state.category, period: state.period, origin: state.origin });
   const key = params.toString();
   if (!viewCache.has(key)) {
     $('#content').innerHTML = '<div class="empty">Se calculează…</div>';
@@ -254,7 +258,7 @@ async function renderView(scrollY = 0) {
 history.scrollRestoration = 'manual';
 const snapshot = () => ({
   view: state.view, country: state.country, category: state.category, period: state.period,
-  term: state.term, text: state.text, sort: state.sort, from: state.from ?? null,
+  origin: state.origin, term: state.term, text: state.text, sort: state.sort, from: state.from ?? null,
   appId: state.appId, appCountry: state.appCountry, appKwAll: state.appKwAll,
 });
 // Pagina noua: memoram unde eram (inclusiv scroll-ul) in intrarea curenta, apoi adaugam una noua.
@@ -275,6 +279,7 @@ function syncControls() {
   document.querySelectorAll('#nav a').forEach((x) => x.classList.toggle('active', x.dataset.view === state.view));
   $('#f-country').value = state.country;
   $('#f-category').value = state.category;
+  $('#f-origin').value = state.origin;
   $('#f-text').value = state.text;
 }
 
@@ -461,6 +466,7 @@ const onFilter = (fn) => (e) => { fn(e.target.value); remember(); renderView().t
 $('#f-country').addEventListener('change', onFilter((v) => { state.country = v; }));
 $('#f-category').addEventListener('change', onFilter((v) => { state.category = v; }));
 $('#f-period').addEventListener('change', onFilter((v) => { state.period = Number(v); }));
+$('#f-origin').addEventListener('change', onFilter((v) => { state.origin = v; }));
 $('#f-text').addEventListener('input', (e) => { state.text = e.target.value; renderTable(); remember(); });
 $('#content').addEventListener('click', (e) => {
   const th = e.target.closest('th[data-sort]');

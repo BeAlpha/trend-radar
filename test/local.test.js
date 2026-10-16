@@ -80,3 +80,31 @@ test('appKeywords: cuvintele unde app-ul e in top 10, cu pozitie si scor', () =>
   assert.deepEqual(v.appKeywords(8).map((k) => [k.country, k.term, k.position, k.score]), [['US', 'ai baby', 2, 100]]);
   assert.deepEqual(v.appKeywords(80), []); // 80 nu trebuie sa se potriveasca cu 8
 });
+
+test('Nou: apărut (sugestii de bază sau extindere deja întrebată) vs descoperit (prima întrebare a extinderii)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trl-'));
+  for (let i = 0; i < 12; i++) {
+    const date = addDays('2026-01-01', i);
+    const suggest = [{ prefix: 'a', kind: 'base', terms: i >= 10 ? ['ai baby', 'amazon'] : ['amazon'] }];
+    if (i >= 8) suggest.push({ prefix: 'ai ', kind: 'expand', terms: i >= 10 ? ['ai photo', 'ai video'] : ['ai photo'] });
+    if (i === 10) suggest.push({ prefix: 'zoo ', kind: 'expand', terms: ['zoo park'] });
+    writeJsonGz(dayPath(dir, date, 'US'), { date, country: 'US', complete: true, requests: 1, errors: 0, suggest, charts: [] });
+  }
+  const db = openDb();
+  importAll(db, dir);
+  const v = makeViews(db);
+  const origin = (o) => Object.fromEntries(v.view({ name: 'new', country: 'US', period: 30, origin: o }).rows.map((r) => [r.term, r.origin]));
+  assert.deepEqual(origin('all'), { 'ai baby': 'appeared', 'ai video': 'appeared', 'ai photo': 'discovered', 'zoo park': 'discovered' });
+  assert.deepEqual(Object.keys(origin('appeared')).sort(), ['ai baby', 'ai video']);
+  assert.deepEqual(Object.keys(origin('discovered')).sort(), ['ai photo', 'zoo park']);
+});
+
+test('baza veche (fara tabela queried) => reimport complet la deschidere', () => {
+  const dir = fixture();
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'trl-')), 'x.db');
+  const db = openDb(file);
+  importAll(db, dir);
+  db.exec('PRAGMA user_version = 1');
+  db.close();
+  assert.equal(importAll(openDb(file), dir).days, 12);
+});

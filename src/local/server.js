@@ -14,7 +14,7 @@ const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public')
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
 const STALE_HOURS = 48;
 
-const CSV_COLS = ['country', 'term', 'score', 'delta', 'then', 'categoryName', 'subgenreName', 'difficulty', 'confirmed', 'seenDays', 'ofDays', 'firstSeen'];
+const CSV_COLS = ['country', 'term', 'score', 'delta', 'then', 'categoryName', 'subgenreName', 'difficulty', 'origin', 'confirmed', 'seenDays', 'ofDays', 'firstSeen'];
 const csvCell = (v) => (v == null ? '' : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
 export const toCsv = (rows) => [CSV_COLS.join(','), ...rows.map((r) => CSV_COLS.map((c) => csvCell(r[c])).join(','))].join('\n');
 
@@ -47,7 +47,7 @@ export function createServer({ db, dataDir, refresh = async () => ({}), apple = 
       return { cloud, stale: ageHours == null || ageHours > STALE_HOURS, ageHours, local: views.status() };
     },
     '/api/meta': () => ({ countries: COUNTRIES, categories: views.categories() }),
-    '/api/view': (q) => views.view({ name: q.get('name'), country: q.get('country'), category: q.get('category'), period: q.get('period') }),
+    '/api/view': (q) => views.view({ name: q.get('name'), country: q.get('country'), category: q.get('category'), period: q.get('period'), origin: q.get('origin') ?? 'all' }),
     '/api/themes': (q) => views.themeView({ country: q.get('country'), category: q.get('category') ?? 'all' }),
     '/api/term': (q) => views.termView(q.get('q') ?? ''),
     '/api/suggest': (q) => views.suggestTerms(q.get('q') ?? ''),
@@ -89,7 +89,7 @@ export function createServer({ db, dataDir, refresh = async () => ({}), apple = 
         return sendJson(res, r);
       }
       if (url.pathname === '/api/csv') {
-        const v = views.view({ name: url.searchParams.get('name'), country: url.searchParams.get('country'), category: url.searchParams.get('category'), period: url.searchParams.get('period'), limit: Infinity });
+        const v = views.view({ name: url.searchParams.get('name'), country: url.searchParams.get('country'), category: url.searchParams.get('category'), period: url.searchParams.get('period'), origin: url.searchParams.get('origin') ?? 'all', limit: Infinity });
         res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="trend-radar-${url.searchParams.get('name')}.csv"` });
         return res.end(`﻿${toCsv(v.rows)}`);
       }
