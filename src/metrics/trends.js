@@ -35,12 +35,14 @@ export function seenSince(series, term, firstSeen) {
 }
 
 // periodDays: 1 = doar ultima zi, 7, 30.
-// Dupa perioada de pornire: nou = aparut dupa primele 7 zile.
-// In perioada de pornire (>= 2 zile): PRELIMINAR, nou = nevazut in prima zi de colectare.
+// Cu cel putin o zi DUPA perioada de pornire: nou = aparut dupa primele 7 zile.
+// Pana atunci (>= 2 zile): PRELIMINAR, nou = nevazut in prima zi de colectare
+// (si in ziua a 7-a, altfel lista ar fi goala exact cand se termina pornirea).
 export function newTerms(series, index, periodDays) {
-  const w = warmup(series.dates);
-  if (series.dates.length < 2) return [];
-  const baseEnd = w.done ? w.endDate : series.dates[0];
+  const n = series.dates.length;
+  if (n < 2) return [];
+  const strict = n > WARMUP_DAYS;
+  const baseEnd = strict ? series.dates[WARMUP_DAYS - 1] : series.dates[0];
   const latest = series.dates.at(-1);
   const from = addDays(latest, -(periodDays - 1));
   const out = [];
@@ -48,7 +50,7 @@ export function newTerms(series, index, periodDays) {
     const fs = info.firstSeen;
     if (!fs || fs <= baseEnd || fs < from || fs > latest) continue;
     out.push({
-      term, firstSeen: fs, preliminary: !w.done,
+      term, firstSeen: fs, preliminary: !strict,
       confirmed: isConfirmed(series, term, fs), ...seenSince(series, term, fs),
       score: scoreOn(series, latest, term),
     });

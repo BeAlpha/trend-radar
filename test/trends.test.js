@@ -52,6 +52,15 @@ test('newTerms: in perioada de pornire = preliminar, fata de prima zi', () => {
   assert.equal(r[0].ofDays, 2);
 });
 
+test('newTerms: exact 7 zile = inca preliminar (nu lista goala), de la a 8-a = strict', () => {
+  const s7 = series(days('2026-01-01', 7, (i) => (i >= 3 ? { x: 10, y: 20 } : { x: 10 })));
+  const index = new Map([['x', { firstSeen: '2026-01-01' }], ['y', { firstSeen: '2026-01-04' }]]);
+  const r7 = newTerms(s7, index, 7);
+  assert.deepEqual(r7.map((t) => [t.term, t.preliminary]), [['y', true]]);
+  const s8 = series(days('2026-01-01', 8, (i) => (i >= 3 ? { x: 10, y: 20 } : { x: 10 })));
+  assert.deepEqual(newTerms(s8, index, 7), []);
+});
+
 test('newTerms: o singura zi colectata = nimic', () => {
   const s = series(days('2026-01-01', 1, () => ({ x: 10 })));
   assert.deepEqual(newTerms(s, new Map([['x', { firstSeen: '2026-01-01' }]]), 7), []);

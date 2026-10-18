@@ -156,8 +156,9 @@ function notice(meta) {
   const notes = [];
   if (['new', 'gone'].includes(state.view)) {
     for (const [cc, m] of Object.entries(meta)) {
-      if (m.warmup.done) continue;
-      if (state.view === 'new' && m.warmup.count >= 2) notes.push(`${cc}: PRELIMINAR (${m.warmup.count}/7 zile de bază). „Nou” = nu a apărut în prima zi de colectare. Unele pot fi doar fluctuații de o zi: uită-te la coloana „Văzut”. De la 7 zile, lista devine sigură.`);
+      const prelim = state.view === 'new' && state.rows.some((r) => r.country === cc && r.preliminary);
+      if (m.warmup.done && !prelim) continue;
+      if (prelim) notes.push(`${cc}: PRELIMINAR (${m.warmup.count}/7 zile de bază). „Nou” = nu a apărut în prima zi de colectare. Unele pot fi doar fluctuații de o zi: uită-te la coloana „Văzut”. Din ziua de după cele 7 zile de bază, lista devine sigură.`);
       else notes.push(`${cc}: se adună baza ${m.warmup.count}/7 zile. Până atunci nu putem spune ce e „${state.view === 'new' ? 'nou' : 'dispărut'}”${state.view === 'new' ? ' (trebuie minim 2 zile)' : ''}.`);
     }
   }
