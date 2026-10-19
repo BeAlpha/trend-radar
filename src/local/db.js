@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS problems (path TEXT PRIMARY KEY, error TEXT);
 CREATE TABLE IF NOT EXISTS queried (country TEXT, date TEXT, prefix TEXT, PRIMARY KEY (country, prefix, date));
 `;
 // 2 = tabela `queried` (inceputurile de extindere intrebate in fiecare zi).
-const SCHEMA_VERSION = 2;
+// 3 = literele locale singure punctate ca 2 litere (scorurile se recalculeaza).
+const SCHEMA_VERSION = 3;
 
 export function openDb(file = ':memory:') {
   const db = new DatabaseSync(file);

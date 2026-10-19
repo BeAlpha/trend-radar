@@ -84,11 +84,13 @@ export function deltas(series, windowDays) {
   return out;
 }
 
+// Doar cuvinte prezente in AMBELE ferestre: ce n-a existat "atunci" e la "Nou",
+// ce nu mai exista "acum" e la "Disparute".
 export const rising = (series, w, min = MIN_DELTA) =>
-  deltas(series, w).filter((r) => r.delta >= min).sort((a, b) => b.delta - a.delta);
+  deltas(series, w).filter((r) => r.then > 0 && r.score > 0 && r.delta >= min).sort((a, b) => b.delta - a.delta);
 
 export const falling = (series, w, min = MIN_DELTA) =>
-  deltas(series, w).filter((r) => r.delta <= -min).sort((a, b) => a.delta - b.delta);
+  deltas(series, w).filter((r) => r.then > 0 && r.score > 0 && r.delta <= -min).sort((a, b) => a.delta - b.delta);
 
 // Vazut in >=5 din cele 7 zile complete dinaintea ultimelor 3 si absent din toate ultimele 3.
 export function disappeared(series) {

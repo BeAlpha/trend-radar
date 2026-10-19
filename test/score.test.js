@@ -28,7 +28,9 @@ test('scoreDay ia cea mai buna aparitie a fiecarui cuvant', () => {
 });
 
 test('scoreDay: prefixul cu diacritice se numara pe caractere, nu pe bytes', () => {
-  assert.equal(scoreDay([{ prefix: 'ü', terms: ['überweisung'] }]).get('überweisung'), 100);
+  // 'ü' = 1 caracter (nu 2 bytes); fiind litera locala, are banda de 2 litere
+  assert.equal(scoreDay([{ prefix: 'ü', terms: ['überweisung'] }]).get('überweisung'), 69);
+  assert.equal(scoreDay([{ prefix: 'üb', terms: ['überweisung'] }]).get('überweisung'), 69);
 });
 
 test('median si difficulty', () => {
@@ -56,4 +58,11 @@ test('categorize: sub 4 la orice gen => Mixt (0)', () => {
 test('categorize: la Games pastreaza subgenul majoritar', () => {
   const apps = [app(6014, 7012), app(6014, 7012), app(6014, 7003), app(6014, 7012), app(6017)];
   assert.deepEqual(categorize(apps), { category: 6014, subgenre: 7012 });
+});
+
+test('litera locala singura are scorul unui inceput de 2 litere', async () => {
+  const { scoreDay } = await import('../src/metrics/score.js');
+  const m = scoreDay([{ prefix: 'ñ', terms: ['ñam'] }, { prefix: 'a', terms: ['amazon'] }]);
+  assert.equal(m.get('ñam'), 69);
+  assert.equal(m.get('amazon'), 100);
 });

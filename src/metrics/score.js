@@ -13,11 +13,17 @@ export function bandScore(prefixLen, position) {
   return Math.max(b.bottom, Math.round(s));
 }
 
+// O litera locala singura (ä, é, ñ, ò...) e tastata rar: o tratam ca pe 2 litere, nu ca pe "a".
+export const prefixWeight = (prefix) => {
+  const len = [...prefix].length;
+  return len === 1 && !/^[a-z]$/.test(prefix) ? 2 : len;
+};
+
 // entries: [{ prefix, terms: [...] }] -> Map(term -> cel mai bun scor)
 export function scoreDay(entries) {
   const best = new Map();
   for (const { prefix, terms } of entries) {
-    const len = [...prefix].length;
+    const len = prefixWeight(prefix);
     terms.forEach((t, i) => {
       const s = bandScore(len, i + 1);
       if (s > (best.get(t) ?? 0)) best.set(t, s);
@@ -30,7 +36,7 @@ export function scoreDay(entries) {
 export function bestObservations(entries) {
   const best = new Map();
   for (const { prefix, terms } of entries) {
-    const len = [...prefix].length;
+    const len = prefixWeight(prefix);
     terms.forEach((t, i) => {
       const s = bandScore(len, i + 1);
       if (s > (best.get(t)?.score ?? 0)) best.set(t, { score: s, prefix, position: i + 1 });

@@ -94,6 +94,12 @@ test('deltas: fara zile in fereastra "atunci" => lista goala', () => {
   assert.deepEqual(deltas(s, 30), []);
 });
 
+test('rising/falling: ignora cuvintele absente intr-una din ferestre', () => {
+  const s = series(days('2026-01-01', 20, (i) => (i >= 17 ? { nou: 60, sus: 60 } : { sus: 20, pleacă: 50 })));
+  assert.deepEqual(rising(s, 7).map((r) => r.term), ['sus']);
+  assert.deepEqual(falling(s, 7), []);
+});
+
 test('rising: sub +5 nu intra', () => {
   const s = series(days('2026-01-01', 20, (i) => (i >= 17 ? { mic: 24 } : { mic: 20 })));
   assert.deepEqual(rising(s, 7), []);
