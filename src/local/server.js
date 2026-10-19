@@ -75,8 +75,9 @@ export function createServer({ db, dataDir, refresh = async () => ({}), apple = 
       const keywords = views.appKeywords(id).map((k) => ({
         ...k, source: detail && k.country === cc ? keywordSource(k.term, detail.name, detail.subtitle) : null,
       }));
-      return { country: cc, detail, keywords };
+      return { country: cc, detail, keywords, ranks: views.appRanks(id) };
     },
+    '/api/new-apps': (q) => views.newApps({ country: q.get('country'), category: q.get('category'), type: q.get('type') ?? 'all', launched: q.get('period') }),
     '/api/genre': (q) => ({ name: genreName(Number(q.get('id'))) }),
   };
 

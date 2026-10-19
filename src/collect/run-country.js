@@ -9,6 +9,7 @@ import {
   dayPath, classifyPath, writeJsonGz, readCountryDays, readCountryClassifications,
 } from '../data/files.js';
 import { addDays } from '../util/dates.js';
+import { collectAppMeta } from './app-meta.js';
 
 const NEW_PRIORITY_DAYS = 7;
 export const RECLASSIFY_DAYS = 30;
@@ -50,6 +51,7 @@ export async function runCountry({
     chartGenres = CHART_GENRES,
     classifyMs = 3 * 3600_000,
     classifyMax = Infinity,
+    appMetaMax = Infinity,
   } = budget;
   const { counter } = apple;
   let aborted = false;
@@ -96,6 +98,9 @@ export async function runCountry({
     }
   }
 
+  // 3b. Data lansarii pentru app-urile noi din topuri (pentru "Aplicatii noi")
+  const appMeta = await collectAppMeta({ country, date, dataDir, apple, charts, log, stop, max: appMetaMax });
+
   // 4. Clasificare pe categorii (in limita de timp; restul ramane pe maine)
   const todayScores = scoreDay(suggest);
   const queue = classificationQueue(index, todayScores, date);
@@ -129,7 +134,7 @@ export async function runCountry({
   const summary = {
     country, date, complete, requests, errors: failures,
     terms: todayScores.size, expanded: expand.length, charts: charts.length,
-    classified: Object.keys(classified).length, queueLeft: queue.length - Object.keys(classified).length,
+    appMeta, classified: Object.keys(classified).length, queueLeft: queue.length - Object.keys(classified).length,
   };
   log(`[${country}] gata: ${JSON.stringify(summary)}`);
   return summary;

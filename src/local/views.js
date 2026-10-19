@@ -172,6 +172,69 @@ export function makeViews(db) {
     return out.sort((a, b) => b.score - a.score || a.position - b.position);
   }
 
+  // Aplicatii noi in topuri: lansate in ultimele `launched` zile si prezente in topurile de azi.
+  // Pentru fiecare: cel mai bun loc (si in ce top), urcarea fata de acum 7 zile in ACELASI top, in cate tari.
+  function newApps({ country = 'US', category = 'all', type = 'all', launched = 90, limit = MAX_ROWS }) {
+    const ccs = country === 'ALL' ? COUNTRIES : [country];
+    const days = Number(launched) || 90;
+    const byId = new Map();
+    for (const cc of ccs) {
+      const latest = db.prepare('SELECT MAX(date) d FROM charts WHERE country=?').get(cc).d;
+      if (!latest) continue;
+      const since = addDays(latest, -days);
+      const weekAgo = addDays(latest, -7);
+      const rows = db.prepare(`SELECT c.app_id id, c.type, c.genre_id, c.rank, c.name, m.genre_id app_genre,
+          m.release_date, m.seller
+        FROM charts c JOIN app_meta m ON m.country=c.country AND m.id=c.app_id
+        WHERE c.country=? AND c.date=? AND m.release_date>=?`).all(cc, latest, since);
+      const rankThen = db.prepare('SELECT rank FROM charts WHERE country=? AND date=? AND type=? AND genre_id=? AND app_id=?');
+      const firstIn = db.prepare('SELECT MIN(date) d FROM charts WHERE country=? AND app_id=?');
+      const best = new Map();
+      for (const r of rows) {
+        if (type === 'free' && r.type !== 'topfreeapplications') continue;
+        if (type === 'paid' && r.type !== 'toppaidapplications') continue;
+        const b = best.get(r.id);
+        if (!b) best.set(r.id, { ...r, charts: 1 });
+        else { b.charts++; if (r.rank < b.rank) Object.assign(b, { type: r.type, genre_id: r.genre_id, rank: r.rank }); }
+      }
+      for (const b of best.values()) {
+        const then = rankThen.get(cc, weekAgo, b.type, b.genre_id, b.id)?.rank ?? null;
+        const entry = {
+          country: cc, bestRank: b.rank, type: b.type, chartGenre: b.genre_id, charts: b.charts,
+          climb: then == null ? null : then - b.rank, newInChart: then == null,
+          inTopSince: firstIn.get(cc, b.id).d,
+        };
+        const cur = byId.get(b.id);
+        if (!cur) {
+          byId.set(b.id, { id: b.id, name: b.name, seller: b.seller, genreId: b.app_genre, releaseDate: b.release_date, best: entry, countries: [cc] });
+        } else {
+          cur.countries.push(cc);
+          if (entry.bestRank < cur.best.bestRank) cur.best = entry;
+        }
+      }
+    }
+    let out = [...byId.values()].map((a) => ({
+      id: a.id, name: a.name, seller: a.seller, releaseDate: a.releaseDate,
+      genreId: a.genreId, categoryName: genreName(a.genreId),
+      country: a.best.country, countries: a.countries, countryCount: a.countries.length,
+      bestRank: a.best.bestRank, type: a.best.type, bestChartName: genreName(a.best.chartGenre),
+      climb: a.best.climb, newInChart: a.best.newInChart, charts: a.best.charts, inTopSince: a.best.inTopSince,
+    }));
+    if (category !== 'all' && category != null && category !== '') out = out.filter((a) => a.genreId === Number(category));
+    out.sort((a, b) => b.countryCount - a.countryCount || a.bestRank - b.bestRank);
+    return { total: out.length, rows: out.slice(0, limit) };
+  }
+
+  // Locul cel mai bun in topuri, pe zile, pentru graficul de pe pagina aplicatiei.
+  function appRanks(appId) {
+    const id = Number(appId);
+    return COUNTRIES.map((cc) => ({
+      country: cc,
+      points: db.prepare('SELECT date, MIN(rank) score FROM charts WHERE app_id=? AND country=? GROUP BY date ORDER BY date')
+        .all(id, cc).map((r) => ({ date: r.date, score: r.score })),
+    }));
+  }
+
   function suggestTerms(q) {
     return db.prepare('SELECT DISTINCT term FROM seen WHERE term LIKE ? ORDER BY length(term) LIMIT 15')
       .all(`${q.trim().toLowerCase()}%`).map((r) => r.term);
@@ -201,7 +264,7 @@ export function makeViews(db) {
   }
 
   return {
-    view, themeView, termView, suggestTerms, appKeywords, categories, status,
+    view, themeView, termView, suggestTerms, appKeywords, newApps, appRanks, categories, status,
     invalidate: () => { version++; cache.clear(); },
   };
 }

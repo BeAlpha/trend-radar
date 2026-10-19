@@ -6,7 +6,7 @@ import path from 'node:path';
 import { runCountry, classificationQueue, expansionPrefixes } from '../src/collect/run-country.js';
 import { prefixesFor } from '../src/collect/prefixes.js';
 import { makeCounter } from '../src/apple/net.js';
-import { readJsonGz, dayPath, classifyPath, writeJsonGz } from '../src/data/files.js';
+import { readJsonGz, dayPath, classifyPath, appsPath, writeJsonGz } from '../src/data/files.js';
 import { addDays } from '../src/util/dates.js';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'tr-'));
@@ -27,6 +27,10 @@ function fakeApple({ failSuggest = () => false } = {}) {
       return [1, 2, 3, 4, 5].map((id) => ({ id, name: `A${id}`, genreId: 6003, subgenreId: null, ratings: 100 }));
     }),
     chart: () => counter.track(async () => { calls.chart++; return [{ rank: 1, id: 9, name: 'Z', genreId: 6003 }]; }),
+    appMeta: (ids) => counter.track(async () => {
+      calls.appMeta = [...(calls.appMeta ?? []), ids];
+      return ids.map((id) => ({ id, name: `App ${id}`, genreId: 6003, releaseDate: '2026-10-01', seller: 'S' }));
+    }),
   };
 }
 
@@ -111,4 +115,18 @@ test('runCountry: rularea de proba (smoke) nu e zi completa', async () => {
   });
   assert.equal(s.complete, false);
   assert.equal(readJsonGz(dayPath(dir, '2026-10-12', 'US')).smoke, true);
+});
+
+test('runCountry: data lansarii doar pentru app-urile din topuri inca necunoscute', async () => {
+  const dir = tmp();
+  writeJsonGz(appsPath(dir, '2026-10-01', 'US'), { 8: { name: 'Vechi', releaseDate: '2020-01-01' } });
+  const apple = fakeApple();
+  apple.chart = () => apple.counter.track(async () => [{ rank: 1, id: 9, name: 'Z', genreId: 6003 }, { rank: 2, id: 8, name: 'V', genreId: 6003 }]);
+  const s = await runCountry({
+    country: 'US', date: '2026-10-12', dataDir: dir, apple, log: () => {},
+    budget: { prefixes: ['a'], chartGenres: [6003], classifyMax: 0 },
+  });
+  assert.deepEqual(apple.calls.appMeta, [[9]]);
+  assert.equal(s.appMeta, 1);
+  assert.equal(readJsonGz(appsPath(dir, '2026-10-12', 'US'))[9].releaseDate, '2026-10-01');
 });

@@ -23,7 +23,7 @@ if (!COUNTRIES.includes(country)) {
 
 // --smoke = rulare de proba: putine cereri, ca sa verificam ca totul merge cap-coada.
 const budget = values.smoke
-  ? { prefixes: prefixesFor(country).slice(0, 30), expandMax: 10, chartGenres: [6014, 6008], classifyMax: 20 }
+  ? { prefixes: prefixesFor(country).slice(0, 30), expandMax: 10, chartGenres: [6014, 6008], classifyMax: 20, appMetaMax: 100 }
   : {};
 
 const apple = makeAppleClient({ retry: makeRetry({ log: console.log }) });

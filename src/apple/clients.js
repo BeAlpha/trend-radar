@@ -44,6 +44,17 @@ export function parseChart(json) {
   }));
 }
 
+// Date stabile ale unui app, pentru "Aplicatii noi": in primul rand data lansarii.
+export function parseAppMeta(json) {
+  return (json.results ?? []).filter((r) => r.trackId).map((r) => ({
+    id: r.trackId,
+    name: r.trackName ?? '',
+    genreId: Number(r.primaryGenreId) || null,
+    releaseDate: r.releaseDate ? r.releaseDate.slice(0, 10) : null,
+    seller: r.sellerName ?? r.artistName ?? '',
+  }));
+}
+
 export function parseLookup(json) {
   return (json.results ?? []).map((r) => ({
     id: r.trackId,
@@ -125,6 +136,10 @@ export function makeAppleClient({
         detail.subtitle = null; // pagina web e optionala; restul metadatelor raman
       }
       return detail;
+    },
+    appMeta(ids, country) {
+      const url = `https://itunes.apple.com/lookup?id=${ids.join(',')}&country=${country.toLowerCase()}`;
+      return call(heavy, 'lookup', url, {}, async (r) => parseAppMeta(await r.json()));
     },
     lookup(ids, country) {
       const url = `https://itunes.apple.com/lookup?id=${ids.join(',')}&country=${country.toLowerCase()}`;

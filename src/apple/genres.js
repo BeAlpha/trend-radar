@@ -15,7 +15,8 @@ export const GAME_SUBGENRES = {
 };
 
 export const MIXED = 0;
-export const CHART_GENRES = Object.keys(GENRES).map(Number);
+// Topurile pe subgenuri de jocuri: un joc nou intra aici mult inainte de topul general "Games".
+export const CHART_GENRES = [...Object.keys(GENRES), ...Object.keys(GAME_SUBGENRES)].map(Number);
 
 export function genreName(id) {
   if (id === MIXED || id == null) return 'Mixt';

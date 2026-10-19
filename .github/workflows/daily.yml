@@ -61,6 +61,7 @@ jobs:
           path: |
             data/days/${{ needs.plan.outputs.date }}/${{ matrix.country }}.json.gz
             data/classify/${{ needs.plan.outputs.date }}/${{ matrix.country }}.json.gz
+            data/apps/${{ needs.plan.outputs.date }}/${{ matrix.country }}.json.gz
           if-no-files-found: warn
           retention-days: 3
 

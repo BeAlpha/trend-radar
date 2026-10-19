@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { COUNTRIES } from '../apple/clients.js';
-import { listDates, dayPath, classifyPath, readJsonGzSafe } from '../data/files.js';
+import { listDates, dayPath, classifyPath, appsPath, readJsonGzSafe } from '../data/files.js';
 import { bestObservations } from '../metrics/score.js';
 
 const SCHEMA = `
@@ -22,11 +22,15 @@ CREATE TABLE IF NOT EXISTS charts (country TEXT, date TEXT, type TEXT, genre_id 
   app_id INTEGER, name TEXT, app_genre INTEGER);
 CREATE INDEX IF NOT EXISTS charts_cd ON charts (country, date);
 CREATE TABLE IF NOT EXISTS problems (path TEXT PRIMARY KEY, error TEXT);
+CREATE TABLE IF NOT EXISTS app_meta (country TEXT, id INTEGER, name TEXT, genre_id INTEGER, release_date TEXT,
+  seller TEXT, seen_at TEXT, PRIMARY KEY (country, id));
+CREATE INDEX IF NOT EXISTS charts_app ON charts (app_id, country, date);
 CREATE TABLE IF NOT EXISTS queried (country TEXT, date TEXT, prefix TEXT, PRIMARY KEY (country, prefix, date));
 `;
 // 2 = tabela `queried` (inceputurile de extindere intrebate in fiecare zi).
 // 3 = literele locale singure punctate ca 2 litere (scorurile se recalculeaza).
-const SCHEMA_VERSION = 3;
+// 4 = app_meta (data lansarii app-urilor din topuri).
+const SCHEMA_VERSION = 4;
 
 export function openDb(file = ':memory:') {
   const db = new DatabaseSync(file);
@@ -74,16 +78,30 @@ function importClassify(db, cc, file) {
   }
 }
 
+function importApps(db, cc, file) {
+  const up = db.prepare('INSERT OR REPLACE INTO app_meta VALUES (?,?,?,?,?,?,?)');
+  for (const [id, m] of Object.entries(file)) {
+    up.run(cc, Number(id), m.name ?? '', m.genreId ?? null, m.releaseDate ?? null, m.seller ?? '', m.seenAt ?? null);
+  }
+}
+
+const PATHS = { days: dayPath, classify: classifyPath, apps: appsPath };
+const IMPORTERS = {
+  days: (db, cc, v) => importDay(db, v),
+  classify: importClassify,
+  apps: importApps,
+};
+
 // Importa doar fisierele noi sau schimbate (dupa marime). Fisierele stricate ajung in `problems`.
 export function importAll(db, dataDir) {
-  const stats = { days: 0, classify: 0, problems: 0 };
+  const stats = { days: 0, classify: 0, apps: 0, problems: 0 };
   const done = db.prepare('SELECT size FROM imported WHERE kind=? AND date=? AND country=?');
   const mark = db.prepare('INSERT OR REPLACE INTO imported VALUES (?,?,?,?)');
   const problem = db.prepare('INSERT OR REPLACE INTO problems VALUES (?,?)');
-  for (const kind of ['days', 'classify']) {
+  for (const kind of Object.keys(PATHS)) {
     for (const date of listDates(dataDir, kind)) {
       for (const cc of COUNTRIES) {
-        const file = kind === 'days' ? dayPath(dataDir, date, cc) : classifyPath(dataDir, date, cc);
+        const file = PATHS[kind](dataDir, date, cc);
         if (!fs.existsSync(file)) continue;
         const size = fs.statSync(file).size;
         if (done.get(kind, date, cc)?.size === size) continue;
@@ -94,7 +112,7 @@ export function importAll(db, dataDir) {
           continue;
         }
         tx(db, () => {
-          if (kind === 'days') importDay(db, r.value); else importClassify(db, cc, r.value);
+          IMPORTERS[kind](db, cc, r.value);
           mark.run(kind, date, cc, size);
         });
         stats[kind]++;

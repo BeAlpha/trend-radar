@@ -32,8 +32,8 @@ function fixture() {
 test('import incremental + vederi', () => {
   const dir = fixture();
   const db = openDb();
-  assert.deepEqual(importAll(db, dir), { days: 12, classify: 1, problems: 0 });
-  assert.deepEqual(importAll(db, dir), { days: 0, classify: 0, problems: 0 }, 'a doua oara nu reimporta');
+  assert.deepEqual(importAll(db, dir), { days: 12, classify: 1, apps: 0, problems: 0 });
+  assert.deepEqual(importAll(db, dir), { days: 0, classify: 0, apps: 0, problems: 0 }, 'a doua oara nu reimporta');
 
   const v = makeViews(db);
   const nou = v.view({ name: 'new', country: 'US', period: 7 });
@@ -107,4 +107,41 @@ test('baza veche (fara tabela queried) => reimport complet la deschidere', () =>
   db.exec('PRAGMA user_version = 1');
   db.close();
   assert.equal(importAll(openDb(file), dir).days, 12);
+});
+
+test('newApps: lansate recent, cel mai bun loc, urcare pe 7 zile, in cate tari', async () => {
+  const { appsPath } = await import('../src/data/files.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trl-'));
+  for (let i = 0; i < 9; i++) {
+    const date = addDays('2026-01-01', i);
+    for (const cc of ['US', 'GB']) {
+      const apps = [{ rank: 1, id: 1, name: 'Vechi', genreId: 6014 }];
+      if (i === 1) apps.push({ rank: 50, id: 2, name: 'Joc Nou', genreId: 6014 });
+      if (i === 8) apps.push({ rank: 3, id: 2, name: 'Joc Nou', genreId: 6014 });
+      if (i === 8 && cc === 'US') apps.push({ rank: 9, id: 3, name: 'Abia Intrat', genreId: 6014 });
+      writeJsonGz(dayPath(dir, date, cc), { date, country: cc, complete: true, requests: 1, errors: 0, suggest: [],
+        charts: [{ type: 'topfreeapplications', genreId: 7012, apps }] });
+    }
+  }
+  for (const cc of ['US', 'GB']) {
+    writeJsonGz(appsPath(dir, '2026-01-09', cc), {
+      1: { name: 'Vechi', genreId: 6014, releaseDate: '2019-05-01' },
+      2: { name: 'Joc Nou', genreId: 6014, releaseDate: '2025-12-20' },
+      3: { name: 'Abia Intrat', genreId: 6014, releaseDate: '2025-11-01' },
+    });
+  }
+  const db = openDb();
+  importAll(db, dir);
+  const v = makeViews(db);
+  const us = v.newApps({ country: 'US', launched: 30 });
+  assert.deepEqual(us.rows.map((r) => r.id), [2]);
+  assert.equal(us.rows[0].bestRank, 3);
+  assert.equal(us.rows[0].climb, 47);
+  assert.equal(us.rows[0].bestChartName, 'Puzzle');
+  const all = v.newApps({ country: 'ALL', launched: 90 });
+  assert.deepEqual(all.rows.map((r) => [r.id, r.countries.length]), [[2, 2], [3, 1]]);
+  assert.equal(all.rows[1].climb, null); // intrat azi in top
+  assert.equal(all.rows[1].newInChart, true);
+  const ranks = v.appRanks(2);
+  assert.deepEqual(ranks.find((s) => s.country === 'US').points.map((p) => [p.date, p.score]), [['2026-01-02', 50], ['2026-01-09', 3]]);
 });

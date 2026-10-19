@@ -134,3 +134,9 @@ td.term a:hover { text-decoration: underline; }
 .ico img { width: 28px; height: 28px; display: block; }
 .ico.ph { background: rgba(127, 127, 127, 0.18); }
 a.ico:hover { outline: 2px solid currentColor; outline-offset: 1px; }
+
+/* Tabelul "Aplicatii noi": numele se poate rupe pe doua randuri, detaliile sunt mici */
+td .meta { font-size: 12px; font-weight: 400; color: var(--text-muted); }
+td.appname { white-space: normal; min-width: 180px; max-width: 320px; font-weight: 600; }
+td.appname a { cursor: pointer; text-decoration: none; }
+td.appname a:hover { text-decoration: underline; }
