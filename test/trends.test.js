@@ -20,7 +20,7 @@ test('warmup: nu e gata sub 7 zile complete', () => {
   assert.equal(w.endDate, '2026-01-07');
 });
 
-test('newTerms: ignora ce a aparut in perioada de pornire', () => {
+test('newTerms: aparut dupa 7 zile de urmarire = sigur, nu preliminar', () => {
   const s = series(days('2026-01-01', 10, (i) => (i >= 8 ? { vechi: 50, nou: 60 } : { vechi: 50 })));
   const index = new Map([
     ['vechi', { firstSeen: '2026-01-01' }],
@@ -28,6 +28,7 @@ test('newTerms: ignora ce a aparut in perioada de pornire', () => {
   ]);
   const r = newTerms(s, index, 7);
   assert.deepEqual(r.map((x) => x.term), ['nou']);
+  assert.equal(r[0].preliminary, false);
   assert.equal(r[0].confirmed, true); // vazut 09 si 10
   assert.equal(r[0].score, 60);
 });
@@ -52,13 +53,12 @@ test('newTerms: in perioada de pornire = preliminar, fata de prima zi', () => {
   assert.equal(r[0].ofDays, 2);
 });
 
-test('newTerms: exact 7 zile = inca preliminar (nu lista goala), de la a 8-a = strict', () => {
-  const s7 = series(days('2026-01-01', 7, (i) => (i >= 3 ? { x: 10, y: 20 } : { x: 10 })));
-  const index = new Map([['x', { firstSeen: '2026-01-01' }], ['y', { firstSeen: '2026-01-04' }]]);
-  const r7 = newTerms(s7, index, 7);
-  assert.deepEqual(r7.map((t) => [t.term, t.preliminary]), [['y', true]]);
+test('newTerms: aparitiile din primele 7 zile raman in lista, marcate preliminar', () => {
   const s8 = series(days('2026-01-01', 8, (i) => (i >= 3 ? { x: 10, y: 20 } : { x: 10 })));
-  assert.deepEqual(newTerms(s8, index, 7), []);
+  s8.scores.get('2026-01-08').set('z', 30);
+  const index = new Map([['x', { firstSeen: '2026-01-01' }], ['y', { firstSeen: '2026-01-04' }], ['z', { firstSeen: '2026-01-08' }]]);
+  const r = newTerms(s8, index, 7);
+  assert.deepEqual(r.map((t) => [t.term, t.priorDays, t.preliminary]), [['z', 7, false], ['y', 3, true]]);
 });
 
 test('newTerms: o singura zi colectata = nimic', () => {

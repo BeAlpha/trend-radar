@@ -35,22 +35,23 @@ export function seenSince(series, term, firstSeen) {
 }
 
 // periodDays: 1 = doar ultima zi, 7, 30.
-// Cu cel putin o zi DUPA perioada de pornire: nou = aparut dupa primele 7 zile.
-// Pana atunci (>= 2 zile): PRELIMINAR, nou = nevazut in prima zi de colectare
-// (si in ziua a 7-a, altfel lista ar fi goala exact cand se termina pornirea).
+// Nou = nevazut in prima zi de colectare si aparut in perioada aleasa.
+// priorDays = cate zile complete l-am urmarit inainte de aparitie fara sa-l vedem;
+// sub 7 zile e PRELIMINAR (poate fi doar o fluctuatie), de la 7 e sigur.
+// Nu aruncam cuvintele aparute in primele 7 zile: doar le marcam.
 export function newTerms(series, index, periodDays) {
   const n = series.dates.length;
   if (n < 2) return [];
-  const strict = n > WARMUP_DAYS;
-  const baseEnd = strict ? series.dates[WARMUP_DAYS - 1] : series.dates[0];
+  const baseEnd = series.dates[0];
   const latest = series.dates.at(-1);
   const from = addDays(latest, -(periodDays - 1));
   const out = [];
   for (const [term, info] of index) {
     const fs = info.firstSeen;
     if (!fs || fs <= baseEnd || fs < from || fs > latest) continue;
+    const priorDays = series.dates.filter((d) => d < fs).length;
     out.push({
-      term, firstSeen: fs, preliminary: !strict,
+      term, firstSeen: fs, priorDays, preliminary: priorDays < WARMUP_DAYS,
       confirmed: isConfirmed(series, term, fs), ...seenSince(series, term, fs),
       score: scoreOn(series, latest, term),
     });

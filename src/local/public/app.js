@@ -93,7 +93,7 @@ function cell(col, r) {
     case 'then': case 'seenDays': return `<td class="num">${v ?? '–'}</td>`;
     case 'categoryName': return `<td>${esc(v)}${r.subgenreName ? ` <span class="muted">· ${esc(r.subgenreName)}</span>` : ''}</td>`;
     case 'difficulty': return `<td>${diffDots(v)}</td>`;
-    case 'origin': return `<td>${v === 'discovered' ? '<span class="badge">descoperit</span>' : '<span class="badge ok">apărut</span>'}</td>`;
+    case 'origin': return `<td>${v === 'discovered' ? '<span class="badge">descoperit</span>' : '<span class="badge ok">apărut</span>'}${r.preliminary ? ` <span class="muted" data-tip="${esc(`Apărut după doar ${r.priorDays} ${r.priorDays === 1 ? 'zi' : 'zile'} de urmărire (sigur = 7+). Poate fi o fluctuație.`)}">bază scurtă</span>` : ''}</td>`;
     case 'seenOf': return `<td class="num"><span class="badge ${r.seenDays >= 2 ? 'ok' : 'new'}">${r.seenDays}/${r.ofDays} ${r.ofDays === 1 ? 'zi' : 'zile'}</span></td>`;
     case 'apps': return r.apps?.length
       ? `<td class="apps-cell" data-ids="${r.apps.join(',')}" data-cc="${r.country}">${r.apps.map(() => '<span class="ico ph"></span>').join('')}</td>`
@@ -158,7 +158,7 @@ function notice(meta) {
     for (const [cc, m] of Object.entries(meta)) {
       const prelim = state.view === 'new' && state.rows.some((r) => r.country === cc && r.preliminary);
       if (m.warmup.done && !prelim) continue;
-      if (prelim) notes.push(`${cc}: PRELIMINAR (${m.warmup.count}/7 zile de bază). „Nou” = nu a apărut în prima zi de colectare. Unele pot fi doar fluctuații de o zi: uită-te la coloana „Văzut”. Din ziua de după cele 7 zile de bază, lista devine sigură.`);
+      if (prelim) notes.push(`${cc}: cuvintele marcate „bază scurtă” au apărut când aveam mai puțin de 7 zile de istoric, deci pot fi doar fluctuații. Uită-te la coloana „Văzut”: cele văzute în fiecare zi sunt trenduri reale.`);
       else notes.push(`${cc}: se adună baza ${m.warmup.count}/7 zile. Până atunci nu putem spune ce e „${state.view === 'new' ? 'nou' : 'dispărut'}”${state.view === 'new' ? ' (trebuie minim 2 zile)' : ''}.`);
     }
   }
