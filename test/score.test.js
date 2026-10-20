@@ -66,3 +66,15 @@ test('litera locala singura are scorul unui inceput de 2 litere', async () => {
   assert.equal(m.get('ñam'), 69);
   assert.equal(m.get('amazon'), 100);
 });
+
+test('combinatiile rare de 2 litere: penalizate, dar un inceput normal castiga', async () => {
+  const { naturalPrefix, scoreDayAdjusted, RARE_PENALTY } = await import('../src/metrics/score.js');
+  assert.deepEqual(['ab', 'st', 'sch', 'ä', 'tr', '8 ', 'jt', 'zg', 'mt', 'qk'].map(naturalPrefix), [true, true, true, true, true, true, false, false, false, false]);
+  const m = scoreDayAdjusted([
+    { prefix: 'jt', terms: ['jt rides'] },
+    { prefix: 'vp', terms: ['vpn'] },
+    { prefix: 'mt', terms: ['mtg arena'] }, { prefix: 'ma', terms: ['x', 'mtg arena'] },
+  ]);
+  assert.equal(m.get('jt rides'), 69 - RARE_PENALTY);
+  assert.equal(m.get('mtg arena'), 66); // "ma" pozitia 2 bate "mt" pozitia 1 penalizat
+});

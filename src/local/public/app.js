@@ -28,7 +28,7 @@ document.addEventListener('mouseout', (e) => { if (e.target.closest('[data-tip]'
 const q = (text) => `<span class="q" data-tip="${esc(text)}">?</span>`;
 
 const HELP = {
-  score: 'Scor estimat 0–100 din sugestiile App Store: 70–100 = apare după o singură literă, 40–69 = după 2 litere, 10–39 = doar după un cuvânt + spațiu. Mai sus în listă = scor mai mare. NU e volumul oficial Apple.',
+  score: 'Scor estimat 0–100 din sugestiile App Store: 70–100 = apare după o singură literă, 40–69 = după 2 litere, 10–39 = doar după un cuvânt + spațiu. Mai sus în listă = scor mai mare. Cuvintele găsite doar după combinații rare de 2 litere (ex. „jt”, „zg”, „mt”) primesc −25, fiindcă puțini le tastează; excepție fac cele la care o aplicație cu acel cuvânt în nume e mare (ex. „vpn”). NU e volumul oficial Apple.',
   delta: 'Diferența dintre media scorului din ultimele 3 zile și media de acum 7 (sau 30) de zile. Zilele cu colectare incompletă nu se pun la socoteală.',
   then: 'Media scorului în fereastra de comparație (acum 7–9 zile, sau 30–32 zile).',
   category: 'Categoria majoritară a primelor 10 app-uri din căutarea pentru acest cuvânt (minim 4 din 10). „Mixt” = rezultate amestecate. „Neclasificat” = în coada de clasificare.',
@@ -443,7 +443,7 @@ async function showTerm(term) {
       <tbody>${r.countries.map((c) => `<tr>
         <td>${c.country}</td>
         <td class="num">${c.last && c.last.date === c.lastSeen ? c.last.score : '–'}</td>
-        <td>${c.last ? `„${esc(c.last.prefix)}” → poziția ${c.last.position}` : '<span class="muted">nevăzut</span>'}</td>
+        <td>${c.last ? `„${esc(c.last.prefix)}” → poziția ${c.last.position}${c.last.rare ? ` <span class="muted" data-tip="Combinație rară de litere: puțini oameni o tastează, deci scorul e redus cu 25. Dacă o aplicație cu acest cuvânt în nume e mare, scorul revine întreg.">· rară −25</span>` : ''}` : '<span class="muted">nevăzut</span>'}</td>
         <td>${esc(c.category ?? '–')}${c.subgenre ? ` <span class="muted">· ${esc(c.subgenre)}</span>` : ''}</td>
         <td>${diffDots(c.difficulty)}</td>
         <td>${c.competition == null ? '<span class="muted">–</span>' : `<span class="${compLabel(c.competition)[1]}">${compLabel(c.competition)[0]}</span> <span class="muted">${c.competition} · ${c.niche.fresh}/10 noi</span>`}</td>

@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { COUNTRIES } from '../apple/clients.js';
 import { listDates, dayPath, classifyPath, appsPath, statsPath, readJsonGzSafe } from '../data/files.js';
 import { STATS_FIELDS } from '../collect/app-meta.js';
-import { bestObservations } from '../metrics/score.js';
+import { bestObservations, scoreDayAdjusted } from '../metrics/score.js';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS imported (kind TEXT, date TEXT, country TEXT, size INTEGER,
@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS imported (kind TEXT, date TEXT, country TEXT, size IN
 CREATE TABLE IF NOT EXISTS days (country TEXT, date TEXT, complete INTEGER, requests INTEGER, errors INTEGER,
   PRIMARY KEY (country, date));
 CREATE TABLE IF NOT EXISTS scores (country TEXT, date TEXT, term TEXT, score INTEGER, prefix TEXT, position INTEGER,
-  PRIMARY KEY (country, date, term));
+  score_adj INTEGER, PRIMARY KEY (country, date, term));
 CREATE INDEX IF NOT EXISTS scores_term ON scores (term, country, date);
 CREATE TABLE IF NOT EXISTS seen (country TEXT, term TEXT, first_seen TEXT, last_seen TEXT,
   PRIMARY KEY (country, term));
@@ -37,14 +37,16 @@ CREATE INDEX IF NOT EXISTS new_feed_cd ON new_feed (country, date);
 // 3 = literele locale singure punctate ca 2 litere (scorurile se recalculeaza).
 // 4 = app_meta (data lansarii app-urilor din topuri).
 // 5 = topul incasarilor, lansarile noi, cifrele zilnice ale app-urilor, scorul de nisa al cuvintelor.
-const SCHEMA_VERSION = 5;
+// 6 = scores.score_adj (combinatiile rare de litere penalizate). 7 = cifra + spatiu nu e combinatie rara.
+const SCHEMA_VERSION = 7;
 
 export function openDb(file = ':memory:') {
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
   // Baza veche: tabela `class` fara coloana `niche` (CREATE IF NOT EXISTS nu adauga coloane).
-  const cols = db.prepare("SELECT name FROM pragma_table_info('class')").all().map((r) => r.name);
-  if (cols.length && !cols.includes('niche')) db.exec('DROP TABLE class');
+  const cols = (t) => db.prepare(`SELECT name FROM pragma_table_info('${t}')`).all().map((r) => r.name);
+  if (cols('class').length && !cols('class').includes('niche')) db.exec('DROP TABLE class');
+  if (cols('scores').length && !cols('scores').includes('score_adj')) db.exec('DROP TABLE scores');
   db.exec(SCHEMA);
   // Baza mai veche: fisierele deja importate nu au completat tabelele noi -> reimportam tot.
   if (db.prepare('PRAGMA user_version').get().user_version < SCHEMA_VERSION) {
@@ -70,11 +72,12 @@ function importDay(db, day) {
   for (const s of day.suggest ?? []) if (s.kind === 'expand') insQueried.run(cc, date, s.prefix);
   db.prepare('INSERT OR REPLACE INTO days VALUES (?,?,?,?,?)')
     .run(cc, date, day.complete ? 1 : 0, day.requests ?? 0, day.errors ?? 0);
-  const insScore = db.prepare('INSERT INTO scores VALUES (?,?,?,?,?,?)');
+  const insScore = db.prepare('INSERT INTO scores VALUES (?,?,?,?,?,?,?)');
+  const adj = scoreDayAdjusted(day.suggest ?? []);
   const upSeen = db.prepare(`INSERT INTO seen VALUES (?,?,?,?) ON CONFLICT (country, term) DO UPDATE SET
     first_seen = MIN(first_seen, excluded.first_seen), last_seen = MAX(last_seen, excluded.last_seen)`);
   for (const [term, o] of bestObservations(day.suggest ?? [])) {
-    insScore.run(cc, date, term, o.score, o.prefix, o.position);
+    insScore.run(cc, date, term, o.score, o.prefix, o.position, adj.get(term) ?? o.score);
     upSeen.run(cc, term, date, date);
   }
   const insChart = db.prepare('INSERT INTO charts VALUES (?,?,?,?,?,?,?,?)');

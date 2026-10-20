@@ -58,7 +58,7 @@ test('runCountry scrie fisierul zilei si clasificarile', async () => {
   assert.equal(Object.keys(cls).length, 3);
   assert.equal(cls['a one'].category, 6003);
   assert.equal(cls['a one'].difficulty, 1);
-  assert.deepEqual(cls['a one'].niche, { n: 5, med: 100, stars: 4, fresh: 0, title: 0, brand: false });
+  assert.deepEqual(cls['a one'].niche, { n: 5, med: 100, max: 100, tmax: 0, stars: 4, fresh: 0, title: 0, brand: false });
   assert.equal(s.queueLeft, 1);
 });
 
@@ -149,4 +149,14 @@ test('classificationQueue: cuvintele in crestere fara scor de nisa se refac, dup
   ]);
   const today = new Map([['vechi', 90], ['urca', 50], ['urca2', 60], ['nou', 10]]);
   assert.deepEqual(classificationQueue(index, today, '2026-10-12', new Set(['urca', 'urca2'])), ['nou', 'urca']);
+});
+
+test('classificationQueue: cuvintele din combinatii rare fara app-ul maxim masurat se refac', () => {
+  const index = new Map([
+    ['jt rides', { firstSeen: '2026-09-01', classifiedAt: '2026-10-10', difficulty: 3 }],
+    ['vpn', { firstSeen: '2026-09-01', classifiedAt: '2026-10-10', niche: { tmax: 900000 } }],
+    ['mt5', { firstSeen: '2026-09-01', classifiedAt: '2026-10-10', niche: { tmax: 50 } }],
+  ]);
+  const today = new Map([['jt rides', 69], ['vpn', 69], ['mt5', 66]]);
+  assert.deepEqual(classificationQueue(index, today, '2026-10-12', new Set(), new Set(['jt rides', 'vpn', 'mt5'])), ['jt rides']);
 });

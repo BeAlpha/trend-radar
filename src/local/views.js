@@ -5,18 +5,30 @@ import { newTerms, rising, falling, topTerms, disappeared, warmup } from '../met
 import { chartMovers, themes } from '../metrics/themes.js';
 import { addDays, diffDays } from '../util/dates.js';
 import { competition, opportunity } from '../metrics/niche.js';
+import { BIG_RATINGS } from '../metrics/score.js';
 
 export const SERIES_DAYS = 45;
 export const MAX_ROWS = 1500;
 
-export function loadSeries(db, cc, days = SERIES_DAYS) {
+// Cuvintele cu trafic real dovedit: un app mare care are cuvantul in nume, in primele 10 din cautare.
+// Ele pastreaza scorul intreg chiar daca apar doar dupa o combinatie rara de litere ("vpn", "nfl").
+export function bigTerms(db, cc) {
+  const big = new Set();
+  for (const r of db.prepare('SELECT term, niche FROM class WHERE country=? AND niche IS NOT NULL').all(cc)) {
+    if ((JSON.parse(r.niche).tmax ?? 0) >= BIG_RATINGS) big.add(r.term);
+  }
+  return big;
+}
+export const pickScore = (big, term, score, adj) => (big.has(term) || adj == null ? score : adj);
+
+export function loadSeries(db, cc, days = SERIES_DAYS, big = bigTerms(db, cc)) {
   const dates = db.prepare(
     'SELECT date FROM days WHERE country=? AND complete=1 ORDER BY date DESC LIMIT ?',
   ).all(cc, days).map((r) => r.date).reverse();
   const scores = new Map(dates.map((d) => [d, new Map()]));
   if (dates.length) {
-    const rows = db.prepare('SELECT date, term, score FROM scores WHERE country=? AND date>=?').all(cc, dates[0]);
-    for (const r of rows) scores.get(r.date)?.set(r.term, r.score);
+    const rows = db.prepare('SELECT date, term, score, score_adj FROM scores WHERE country=? AND date>=?').all(cc, dates[0]);
+    for (const r of rows) scores.get(r.date)?.set(r.term, pickScore(big, r.term, r.score, r.score_adj));
   }
   return { dates, scores };
 }
@@ -39,9 +51,13 @@ export function makeViews(db) {
   const cache = new Map();
   const ctx = (cc) => {
     const key = `${cc}:${version}`;
-    if (!cache.has(key)) cache.set(key, { series: loadSeries(db, cc), index: loadIndex(db, cc) });
+    if (!cache.has(key)) {
+      const big = bigTerms(db, cc);
+      cache.set(key, { big, series: loadSeries(db, cc, SERIES_DAYS, big), index: loadIndex(db, cc) });
+    }
     return cache.get(key);
   };
+  const bigOf = (cc) => ctx(cc).big;
 
   const enrich = (cc, index, r, withApps = false) => {
     const i = index.get(r.term) ?? {};
@@ -137,10 +153,14 @@ export function makeViews(db) {
   function termView(term) {
     const t = term.trim().toLowerCase();
     const perCountry = COUNTRIES.map((cc) => {
-      const history = db.prepare(`SELECT d.date, COALESCE(s.score, 0) AS score FROM days d
+      const big = bigOf(cc);
+      const history = db.prepare(`SELECT d.date, COALESCE(s.score, 0) AS score, s.score_adj FROM days d
         LEFT JOIN scores s ON s.country=d.country AND s.date=d.date AND s.term=?
-        WHERE d.country=? AND d.complete=1 ORDER BY d.date DESC LIMIT 90`).all(t, cc).reverse();
-      const last = db.prepare('SELECT date, prefix, position, score FROM scores WHERE country=? AND term=? ORDER BY date DESC LIMIT 1').get(cc, t);
+        WHERE d.country=? AND d.complete=1 ORDER BY d.date DESC LIMIT 90`).all(t, cc).reverse()
+        .map((h) => ({ date: h.date, score: pickScore(big, t, h.score, h.score_adj) }));
+      const lastRow = db.prepare('SELECT date, prefix, position, score, score_adj FROM scores WHERE country=? AND term=? ORDER BY date DESC LIMIT 1').get(cc, t);
+      const last = lastRow ? { date: lastRow.date, prefix: lastRow.prefix, position: lastRow.position,
+        score: pickScore(big, t, lastRow.score, lastRow.score_adj), rare: !big.has(t) && lastRow.score_adj != null && lastRow.score_adj < lastRow.score } : null;
       const seen = db.prepare('SELECT first_seen, last_seen FROM seen WHERE country=? AND term=?').get(cc, t);
       const cls = db.prepare('SELECT * FROM class WHERE country=? AND term=?').get(cc, t);
       return {
@@ -163,14 +183,15 @@ export function makeViews(db) {
     const out = [];
     for (const cc of COUNTRIES) {
       const latest = db.prepare('SELECT MAX(date) d FROM days WHERE country=? AND complete=1').get(cc).d;
-      const rows = db.prepare(`SELECT c.term, c.top_app_ids, c.classified_at, c.category, s.score
+      const big = bigOf(cc);
+      const rows = db.prepare(`SELECT c.term, c.top_app_ids, c.classified_at, c.category, s.score, s.score_adj
         FROM class c LEFT JOIN scores s ON s.country=c.country AND s.term=c.term AND s.date=?
         WHERE c.country=? AND instr(',' || substr(c.top_app_ids, 2, length(c.top_app_ids) - 2) || ',', ',' || ? || ',') > 0`)
         .all(latest, cc, id);
       for (const r of rows) {
         const position = JSON.parse(r.top_app_ids).map(String).indexOf(id) + 1;
         if (position > 0) {
-          out.push({ country: cc, term: r.term, position, score: r.score ?? 0, classifiedAt: r.classified_at, categoryName: genreName(r.category) });
+          out.push({ country: cc, term: r.term, position, score: r.score == null ? 0 : pickScore(big, r.term, r.score, r.score_adj), classifiedAt: r.classified_at, categoryName: genreName(r.category) });
         }
       }
     }

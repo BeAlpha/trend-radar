@@ -8,8 +8,8 @@ test('nicheStats: mediana, nota, noi si cuvantul in titlu (fara diacritice)', ()
     { name: 'Puzzle', ratings: 1000, stars: 3, releaseDate: '2019-01-01' },
     { name: 'CAT café game', ratings: 50, stars: null, releaseDate: '2026-01-01' },
   ];
-  assert.deepEqual(nicheStats(apps, 'cat cafe', '2026-10-12'), { n: 3, med: 50, stars: 3.5, fresh: 1, title: 2, brand: false });
-  assert.deepEqual(nicheStats([], 'x', '2026-10-12'), { n: 0, med: 0, stars: null, fresh: 0, title: 0, brand: false });
+  assert.deepEqual(nicheStats(apps, 'cat cafe', '2026-10-12'), { n: 3, med: 50, max: 1000, tmax: 50, stars: 3.5, fresh: 1, title: 2, brand: false });
+  assert.deepEqual(nicheStats([], 'x', '2026-10-12'), { n: 0, med: 0, max: 0, tmax: 0, stars: null, fresh: 0, title: 0, brand: false });
 });
 
 test('competition / opportunity', () => {

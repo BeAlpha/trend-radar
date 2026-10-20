@@ -19,6 +19,33 @@ export const prefixWeight = (prefix) => {
   return len === 1 && !/^[a-z]$/.test(prefix) ? 2 : len;
 };
 
+// Combinatiile de 2 litere care nu incep un cuvant (fara vocala si nu un grup ca "st", "tr", "sch"...):
+// le tasteaza putini oameni, deci sugestiile lor (acronime, app-uri mici: "jt rides", "zg survival")
+// au trafic mult mai mic decat arata pozitia. Acronimele mari ("vpn", "nfl") sunt scutite in interfata
+// cand un app cu cuvantul IN NUME e mare (vezi BIG_RATINGS; app-urile mari fara legatura nu conteaza).
+const VOWELS = /[aeiouyäöüéèêëàâáòóôìíîïúùûœæåø]/;
+const CLUSTERS = new Set(`bl br ch cl cr dr dw fl fr gh gl gn gr gw kl kn kr ph pl pr ps sc sh sk sl sm sn sp sq
+  st sw sz th tr ts tw vl wh wr zw pf sb sd sf sg sv`.split(/\s+/));
+export const naturalPrefix = (prefix) => [...prefix].length !== 2 || VOWELS.test(prefix) || /[\d ]/.test(prefix) || CLUSTERS.has(prefix);
+export const RARE_PENALTY = 25;
+// Un app din primele 10 care are cuvantul in nume si atatea rating-uri = trafic real, fara penalizare.
+export const BIG_RATINGS = 3000;
+
+// Ca scoreDay, dar observatiile din combinatii rare de litere pierd RARE_PENALTY puncte
+// (daca acelasi cuvant apare si printr-un inceput normal, se ia scorul acela).
+export function scoreDayAdjusted(entries) {
+  const best = new Map();
+  for (const { prefix, terms } of entries) {
+    const len = prefixWeight(prefix);
+    const pen = naturalPrefix(prefix) ? 0 : RARE_PENALTY;
+    terms.forEach((t, i) => {
+      const s = Math.max(1, bandScore(len, i + 1) - pen);
+      if (s > (best.get(t) ?? 0)) best.set(t, s);
+    });
+  }
+  return best;
+}
+
 // entries: [{ prefix, terms: [...] }] -> Map(term -> cel mai bun scor)
 export function scoreDay(entries) {
   const best = new Map();

@@ -7,7 +7,8 @@ export const FRESH_DAYS = 180;
 const norm = (s) => s.toLowerCase().normalize('NFKD').replace(/\p{M}/gu, '');
 
 // apps: [{name, ratings, stars, releaseDate}] -> { med, stars, fresh, title, n }
-//   med   = mediana rating-urilor (cat de mari sunt cei din top)
+//   med   = mediana rating-urilor (cat de mari sunt cei din top); max = cel mai mare;
+//   tmax  = cel mai mare dintre cele care au cuvantul in nume (traficul real al cuvantului)
 //   stars = nota medie (sub ~4.2 = utilizatori nemultumiti, loc pentru ceva mai bun)
 //   fresh = cate sunt lansate in ultimele 180 de zile (nou-venitii reusesc sa urce)
 //   title = cate au cuvantul in titlu (concurenta care tinteste exact cuvantul)
@@ -15,7 +16,7 @@ const norm = (s) => s.toLowerCase().normalize('NFKD').replace(/\p{M}/gu, '');
 //           decat restul (ex. "google meet") -> nu e o nisa in care sa intri
 export function nicheStats(apps, term, date) {
   const top = apps.slice(0, 10);
-  if (!top.length) return { n: 0, med: 0, stars: null, fresh: 0, title: 0, brand: false };
+  if (!top.length) return { n: 0, med: 0, max: 0, tmax: 0, stars: null, fresh: 0, title: 0, brand: false };
   const words = norm(term).split(/\s+/).filter(Boolean);
   const since = addDays(date, -FRESH_DAYS);
   const rated = top.filter((a) => a.stars != null);
@@ -23,9 +24,11 @@ export function nicheStats(apps, term, date) {
   return {
     n: top.length,
     med: Math.round(median(top.map((a) => a.ratings ?? 0))),
+    max: Math.max(...top.map((a) => a.ratings ?? 0)),
     stars: rated.length ? Math.round((rated.reduce((s, a) => s + a.stars, 0) / rated.length) * 10) / 10 : null,
     fresh: top.filter((a) => a.releaseDate && a.releaseDate >= since).length,
     title: titled.length,
+    tmax: titled.length ? Math.max(...titled.map((a) => a.ratings ?? 0)) : 0,
     brand: isBrand(top, titled),
   };
 }

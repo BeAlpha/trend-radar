@@ -226,3 +226,26 @@ test('nicheView: cuvintele noi/in crestere cu concurenta, oportunitate si cine f
   assert.equal(row.freshApps, 6);
   assert.equal(row.categoryName, 'Games');
 });
+
+test('scorul ajustat: combinatie rara penalizata, dar nu daca in top e un app mare', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trl-'));
+  for (let i = 0; i < 3; i++) {
+    const date = addDays('2026-01-01', i);
+    writeJsonGz(dayPath(dir, date, 'US'), { date, country: 'US', complete: true, requests: 1, errors: 0,
+      suggest: [{ prefix: 'jt', kind: 'base', terms: ['jt rides'] }, { prefix: 'vp', kind: 'base', terms: ['vpn'] }], charts: [] });
+  }
+  writeJsonGz(classifyPath(dir, '2026-01-02', 'US'), {
+    vpn: { category: 6007, difficulty: 1, topAppIds: [1], classifiedAt: '2026-01-02', niche: { n: 10, med: 500, max: 900000, tmax: 900000 } },
+    'jt rides': { category: 6003, difficulty: 3, topAppIds: [2], classifiedAt: '2026-01-02', niche: { n: 10, med: 90000, max: 900000, tmax: 40 } },
+  });
+  const db = openDb();
+  importAll(db, dir);
+  const v = makeViews(db);
+  const top = v.view({ name: 'top', country: 'US' }).rows;
+  assert.equal(top.find((r) => r.term === 'vpn').score, 69);
+  assert.equal(top.find((r) => r.term === 'jt rides').score, 44);
+  const t = v.termView('jt rides').countries.find((c) => c.country === 'US');
+  assert.equal(t.last.score, 44);
+  assert.equal(t.last.rare, true);
+  assert.equal(t.history.at(-1).score, 44);
+});
