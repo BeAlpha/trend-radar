@@ -32,8 +32,8 @@ function fixture() {
 test('import incremental + vederi', () => {
   const dir = fixture();
   const db = openDb();
-  assert.deepEqual(importAll(db, dir), { days: 12, classify: 1, apps: 0, problems: 0 });
-  assert.deepEqual(importAll(db, dir), { days: 0, classify: 0, apps: 0, problems: 0 }, 'a doua oara nu reimporta');
+  assert.deepEqual(importAll(db, dir), { days: 12, classify: 1, apps: 0, stats: 0, problems: 0 });
+  assert.deepEqual(importAll(db, dir), { days: 0, classify: 0, apps: 0, stats: 0, problems: 0 }, 'a doua oara nu reimporta');
 
   const v = makeViews(db);
   const nou = v.view({ name: 'new', country: 'US', period: 7 });
@@ -143,7 +143,7 @@ test('newApps: lansate recent, cel mai bun loc, urcare pe 7 zile, in cate tari',
   assert.equal(all.rows[1].climb, null); // intrat azi in top
   assert.equal(all.rows[1].newInChart, true);
   const ranks = v.appRanks(2);
-  assert.deepEqual(ranks.find((s) => s.country === 'US').points.map((p) => [p.date, p.score]), [['2026-01-02', 50], ['2026-01-09', 3]]);
+  assert.deepEqual(ranks.downloads.find((s) => s.country === 'US').points.map((p) => [p.date, p.score]), [['2026-01-02', 50], ['2026-01-09', 3]]);
 });
 
 test('newApps: daca cel mai bun top e nou (fara istoric), urcarea vine din topul cu istoric', async () => {
@@ -164,4 +164,65 @@ test('newApps: daca cel mai bun top e nou (fara istoric), urcarea vine din topul
   assert.equal(r.climb, 12);
   assert.equal(r.newInChart, false);
   assert.equal(r.climbChartName, 'Games #4');
+});
+
+test('newApps: face bani (incasari), rating-uri pe zi, zile pana in top; lansari noi in afara topului', async () => {
+  const { appsPath, statsPath } = await import('../src/data/files.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trl-'));
+  for (let i = 0; i < 8; i++) {
+    const date = addDays('2026-01-01', i);
+    const charts = [{ type: 'topfreeapplications', genreId: 6014, apps: [{ rank: 1, id: 1, name: 'Vechi', genreId: 6014 }] }];
+    if (i >= 3) charts[0].apps.push({ rank: 5, id: 2, name: 'Joc', genreId: 6014 });
+    if (i === 7) charts.push({ type: 'topgrossingapplications', genreId: 6014, apps: [{ rank: 9, id: 2, name: 'Joc', genreId: 6014 }] });
+    writeJsonGz(dayPath(dir, date, 'US'), { date, country: 'US', complete: true, requests: 1, errors: 0, suggest: [], charts,
+      newFeed: [{ type: 'newfreeapplications', apps: [{ rank: 1, id: 3, name: 'Abia lansat', genreId: 6014 }] }] });
+    writeJsonGz(statsPath(dir, date, 'US'), { 2: [100 + i * 20, 5, 4.5, '1.0', '2026-01-01', 0], 3: [i * 3, 0, null, '1.0', '2026-01-01', 0] });
+  }
+  writeJsonGz(appsPath(dir, '2026-01-01', 'US'), {
+    1: { name: 'Vechi', genreId: 6014, releaseDate: '2019-05-01' },
+    2: { name: 'Joc', genreId: 6014, releaseDate: '2026-01-02' },
+    3: { name: 'Abia lansat', genreId: 6014, releaseDate: '2026-01-01' },
+  });
+  const db = openDb();
+  importAll(db, dir);
+  const v = makeViews(db);
+  const [r] = v.newApps({ country: 'US', launched: 30 }).rows;
+  assert.equal(r.id, 2);
+  assert.equal(r.bestRank, 5); // locul din descarcari, nu din incasari
+  assert.equal(r.type, 'topfreeapplications');
+  assert.equal(r.grossRank, 9);
+  assert.equal(r.ratings, 240);
+  assert.equal(r.ratingsPerDay, 20);
+  assert.equal(r.daysToTop, 2); // lansat pe 2 ian, in top din 4 ian
+  assert.deepEqual(v.newApps({ country: 'US', launched: 30, type: 'grossing' }).rows.map((x) => [x.id, x.bestRank]), [[2, 9]]);
+  const feed = v.newApps({ country: 'US', launched: 30, source: 'feed' }).rows;
+  assert.deepEqual(feed.map((x) => [x.id, x.ratingsPerDay, x.firstInFeed]), [[3, 3, '2026-01-01']]);
+  const ranks = v.appRanks(2);
+  assert.deepEqual(ranks.grossing.find((s) => s.country === 'US').points, [{ date: '2026-01-08', score: 9 }]);
+  assert.equal(ranks.ratings.find((s) => s.country === 'US').points.length, 8);
+});
+
+test('nicheView: cuvintele noi/in crestere cu concurenta, oportunitate si cine face bani', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trl-'));
+  for (let i = 0; i < 10; i++) {
+    const date = addDays('2026-01-01', i);
+    const terms = ['amazon'];
+    if (i >= 8) terms.push('cat cafe');
+    writeJsonGz(dayPath(dir, date, 'US'), { date, country: 'US', complete: true, requests: 1, errors: 0,
+      suggest: [{ prefix: 'a', kind: 'base', terms }, { prefix: 'ca', kind: 'base', terms: i >= 8 ? ['cat cafe'] : [] }],
+      charts: [{ type: 'topgrossingapplications', genreId: 6014, apps: [{ rank: 3, id: 7, name: 'Cat Cafe', genreId: 6014 }] }] });
+  }
+  writeJsonGz(classifyPath(dir, '2026-01-09', 'US'), {
+    'cat cafe': { category: 6014, difficulty: 1, topAppIds: [7, 8], classifiedAt: '2026-01-09', niche: { n: 10, med: 5, stars: 3.9, fresh: 6, title: 1 } },
+  });
+  const db = openDb();
+  importAll(db, dir);
+  const r = makeViews(db).nicheView({ country: 'US', period: 14 });
+  const row = r.rows.find((x) => x.term === 'cat cafe');
+  assert.equal(row.isNew, true);
+  assert.ok(row.competition < 20);
+  assert.ok(row.opportunity > 60);
+  assert.equal(row.moneyApps, 1);
+  assert.equal(row.freshApps, 6);
+  assert.equal(row.categoryName, 'Games');
 });

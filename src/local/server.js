@@ -9,6 +9,7 @@ import { makeAppleClient, COUNTRIES } from '../apple/clients.js';
 import { makeRetry } from '../apple/net.js';
 import { genreName } from '../apple/genres.js';
 import { keywordSource } from '../metrics/appwords.js';
+import { summarizeReviews } from '../metrics/reviews.js';
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
@@ -75,9 +76,25 @@ export function createServer({ db, dataDir, refresh = async () => ({}), apple = 
       const keywords = views.appKeywords(id).map((k) => ({
         ...k, source: detail && k.country === cc ? keywordSource(k.term, detail.name, detail.subtitle) : null,
       }));
-      return { country: cc, detail, keywords, ranks: views.appRanks(id) };
+      // "Ti-ar mai placea": aceeasi nisa (icon, nume, rating-uri) dintr-un singur lookup.
+      const similar = detail?.similarIds?.length ? await lookupApps(detail.similarIds, cc).catch(() => []) : [];
+      return { country: cc, detail, keywords, ranks: views.appRanks(id), similar };
     },
-    '/api/new-apps': (q) => views.newApps({ country: q.get('country'), category: q.get('category'), type: q.get('type') ?? 'all', launched: q.get('period') }),
+    // Recenziile recente (2 pagini = pana la 100) + rezumatul plangerilor.
+    '/api/reviews': async (q) => {
+      const id = Number(q.get('id'));
+      const cc = COUNTRIES.includes(q.get('country')) ? q.get('country') : 'US';
+      if (!id) throw new Error('id lipsa');
+      const key = `reviews:${cc}:${id}`;
+      if (!appCache.has(key)) {
+        const first = await apple.reviews(id, cc, 1);
+        const second = first.length >= 50 ? await apple.reviews(id, cc, 2).catch(() => []) : [];
+        appCache.set(key, summarizeReviews([...first, ...second]));
+      }
+      return appCache.get(key);
+    },
+    '/api/new-apps': (q) => views.newApps({ country: q.get('country'), category: q.get('category'), type: q.get('type') ?? 'all', launched: q.get('period'), source: q.get('source') ?? 'charts' }),
+    '/api/niches': (q) => views.nicheView({ country: q.get('country'), category: q.get('category'), period: q.get('period') }),
     '/api/genre': (q) => ({ name: genreName(Number(q.get('id'))) }),
   };
 

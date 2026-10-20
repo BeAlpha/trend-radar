@@ -11,3 +11,5 @@ export function todayUTC(now = new Date()) {
 }
 
 export const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+
+export const diffDays = (a, b) => Math.round((Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 864e5);

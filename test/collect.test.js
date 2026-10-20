@@ -6,7 +6,7 @@ import path from 'node:path';
 import { runCountry, classificationQueue, expansionPrefixes } from '../src/collect/run-country.js';
 import { prefixesFor } from '../src/collect/prefixes.js';
 import { makeCounter } from '../src/apple/net.js';
-import { readJsonGz, dayPath, classifyPath, appsPath, writeJsonGz } from '../src/data/files.js';
+import { readJsonGz, dayPath, classifyPath, appsPath, statsPath, writeJsonGz } from '../src/data/files.js';
 import { addDays } from '../src/util/dates.js';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'tr-'));
@@ -24,12 +24,14 @@ function fakeApple({ failSuggest = () => false } = {}) {
     }),
     topApps: (t) => counter.track(async () => {
       calls.topApps.push(t);
-      return [1, 2, 3, 4, 5].map((id) => ({ id, name: `A${id}`, genreId: 6003, subgenreId: null, ratings: 100 }));
+      return [1, 2, 3, 4, 5].map((id) => ({ id, name: `A${id}`, genreId: 6003, subgenreId: null, ratings: 100, stars: 4, releaseDate: '2020-01-01' }));
     }),
+    newFeed: () => counter.track(async () => []),
     chart: () => counter.track(async () => { calls.chart++; return [{ rank: 1, id: 9, name: 'Z', genreId: 6003 }]; }),
     appMeta: (ids) => counter.track(async () => {
       calls.appMeta = [...(calls.appMeta ?? []), ids];
-      return ids.map((id) => ({ id, name: `App ${id}`, genreId: 6003, releaseDate: '2026-10-01', seller: 'S' }));
+      return ids.map((id) => ({ id, name: `App ${id}`, genreId: 6003, releaseDate: '2026-10-01', seller: 'S',
+        ratings: id * 10, ratingsCur: id, stars: 4.5, version: '1.0', updated: '2026-10-10', price: 0 }));
     }),
   };
 }
@@ -50,11 +52,13 @@ test('runCountry scrie fisierul zilei si clasificarile', async () => {
   const day = readJsonGz(dayPath(dir, '2026-10-12', 'US'));
   assert.equal(day.complete, true);
   assert.deepEqual(day.suggest.map((x) => x.prefix), ['a', 'b']);
-  assert.equal(day.charts.length, 2); // free + paid
+  assert.equal(day.charts.length, 3); // free + paid + grossing
+  assert.deepEqual(day.newFeed.map((f) => f.type), ['newfreeapplications', 'newpaidapplications']);
   const cls = readJsonGz(classifyPath(dir, '2026-10-12', 'US'));
   assert.equal(Object.keys(cls).length, 3);
   assert.equal(cls['a one'].category, 6003);
   assert.equal(cls['a one'].difficulty, 1);
+  assert.deepEqual(cls['a one'].niche, { n: 5, med: 100, stars: 4, fresh: 0, title: 0, brand: false });
   assert.equal(s.queueLeft, 1);
 });
 
@@ -117,16 +121,32 @@ test('runCountry: rularea de proba (smoke) nu e zi completa', async () => {
   assert.equal(readJsonGz(dayPath(dir, '2026-10-12', 'US')).smoke, true);
 });
 
-test('runCountry: data lansarii doar pentru app-urile din topuri inca necunoscute', async () => {
+test('runCountry: lookup pentru toate app-urile din topuri + lansari noi; data lansarii doar pentru cele necunoscute', async () => {
   const dir = tmp();
   writeJsonGz(appsPath(dir, '2026-10-01', 'US'), { 8: { name: 'Vechi', releaseDate: '2020-01-01' } });
   const apple = fakeApple();
   apple.chart = () => apple.counter.track(async () => [{ rank: 1, id: 9, name: 'Z', genreId: 6003 }, { rank: 2, id: 8, name: 'V', genreId: 6003 }]);
+  apple.newFeed = (cc, type) => apple.counter.track(async () => (type === 'newfreeapplications' ? [{ rank: 1, id: 4, name: 'N', genreId: 6014 }] : []));
   const s = await runCountry({
     country: 'US', date: '2026-10-12', dataDir: dir, apple, log: () => {},
     budget: { prefixes: ['a'], chartGenres: [6003], classifyMax: 0 },
   });
-  assert.deepEqual(apple.calls.appMeta, [[9]]);
-  assert.equal(s.appMeta, 1);
-  assert.equal(readJsonGz(appsPath(dir, '2026-10-12', 'US'))[9].releaseDate, '2026-10-01');
+  assert.deepEqual(apple.calls.appMeta, [[9, 8, 4]]);
+  assert.deepEqual(s.appMeta, { meta: 2, stats: 3 });
+  const meta = readJsonGz(appsPath(dir, '2026-10-12', 'US'));
+  assert.deepEqual(Object.keys(meta).sort(), ['4', '9']);
+  assert.equal(meta[9].releaseDate, '2026-10-01');
+  assert.deepEqual(readJsonGz(statsPath(dir, '2026-10-12', 'US'))[8], [80, 8, 4.5, '1.0', '2026-10-10', 0]);
+  assert.equal(readJsonGz(dayPath(dir, '2026-10-12', 'US')).newFeed[0].apps[0].id, 4);
+});
+
+test('classificationQueue: cuvintele in crestere fara scor de nisa se refac, dupa cele noi', () => {
+  const index = new Map([
+    ['vechi', { firstSeen: '2026-09-01', classifiedAt: '2026-10-10' }],
+    ['urca', { firstSeen: '2026-09-01', classifiedAt: '2026-10-10' }],
+    ['urca2', { firstSeen: '2026-09-01', classifiedAt: '2026-10-10', niche: { n: 10 } }],
+    ['nou', { firstSeen: '2026-10-11' }],
+  ]);
+  const today = new Map([['vechi', 90], ['urca', 50], ['urca2', 60], ['nou', 10]]);
+  assert.deepEqual(classificationQueue(index, today, '2026-10-12', new Set(['urca', 'urca2'])), ['nou', 'urca']);
 });

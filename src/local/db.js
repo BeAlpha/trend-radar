@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { COUNTRIES } from '../apple/clients.js';
-import { listDates, dayPath, classifyPath, appsPath, readJsonGzSafe } from '../data/files.js';
+import { listDates, dayPath, classifyPath, appsPath, statsPath, readJsonGzSafe } from '../data/files.js';
+import { STATS_FIELDS } from '../collect/app-meta.js';
 import { bestObservations } from '../metrics/score.js';
 
 const SCHEMA = `
@@ -17,7 +18,7 @@ CREATE INDEX IF NOT EXISTS scores_term ON scores (term, country, date);
 CREATE TABLE IF NOT EXISTS seen (country TEXT, term TEXT, first_seen TEXT, last_seen TEXT,
   PRIMARY KEY (country, term));
 CREATE TABLE IF NOT EXISTS class (country TEXT, term TEXT, category INTEGER, subgenre INTEGER, difficulty INTEGER,
-  top_app_ids TEXT, classified_at TEXT, PRIMARY KEY (country, term));
+  top_app_ids TEXT, classified_at TEXT, niche TEXT, PRIMARY KEY (country, term));
 CREATE TABLE IF NOT EXISTS charts (country TEXT, date TEXT, type TEXT, genre_id INTEGER, rank INTEGER,
   app_id INTEGER, name TEXT, app_genre INTEGER);
 CREATE INDEX IF NOT EXISTS charts_cd ON charts (country, date);
@@ -26,15 +27,24 @@ CREATE TABLE IF NOT EXISTS app_meta (country TEXT, id INTEGER, name TEXT, genre_
   seller TEXT, seen_at TEXT, PRIMARY KEY (country, id));
 CREATE INDEX IF NOT EXISTS charts_app ON charts (app_id, country, date);
 CREATE TABLE IF NOT EXISTS queried (country TEXT, date TEXT, prefix TEXT, PRIMARY KEY (country, prefix, date));
+CREATE TABLE IF NOT EXISTS app_stats (country TEXT, id INTEGER, date TEXT, ratings INTEGER, ratings_cur INTEGER,
+  stars REAL, version TEXT, updated TEXT, price REAL, PRIMARY KEY (country, id, date));
+CREATE TABLE IF NOT EXISTS new_feed (country TEXT, date TEXT, type TEXT, rank INTEGER, app_id INTEGER, name TEXT,
+  app_genre INTEGER);
+CREATE INDEX IF NOT EXISTS new_feed_cd ON new_feed (country, date);
 `;
 // 2 = tabela `queried` (inceputurile de extindere intrebate in fiecare zi).
 // 3 = literele locale singure punctate ca 2 litere (scorurile se recalculeaza).
 // 4 = app_meta (data lansarii app-urilor din topuri).
-const SCHEMA_VERSION = 4;
+// 5 = topul incasarilor, lansarile noi, cifrele zilnice ale app-urilor, scorul de nisa al cuvintelor.
+const SCHEMA_VERSION = 5;
 
 export function openDb(file = ':memory:') {
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
+  // Baza veche: tabela `class` fara coloana `niche` (CREATE IF NOT EXISTS nu adauga coloane).
+  const cols = db.prepare("SELECT name FROM pragma_table_info('class')").all().map((r) => r.name);
+  if (cols.length && !cols.includes('niche')) db.exec('DROP TABLE class');
   db.exec(SCHEMA);
   // Baza mai veche: fisierele deja importate nu au completat tabelele noi -> reimportam tot.
   if (db.prepare('PRAGMA user_version').get().user_version < SCHEMA_VERSION) {
@@ -53,6 +63,9 @@ function importDay(db, day) {
   db.prepare('DELETE FROM scores WHERE country=? AND date=?').run(cc, date);
   db.prepare('DELETE FROM charts WHERE country=? AND date=?').run(cc, date);
   db.prepare('DELETE FROM queried WHERE country=? AND date=?').run(cc, date);
+  db.prepare('DELETE FROM new_feed WHERE country=? AND date=?').run(cc, date);
+  const insFeed = db.prepare('INSERT INTO new_feed VALUES (?,?,?,?,?,?,?)');
+  for (const f of day.newFeed ?? []) for (const a of f.apps) insFeed.run(cc, date, f.type, a.rank, a.id, a.name, a.genreId);
   const insQueried = db.prepare('INSERT OR IGNORE INTO queried VALUES (?,?,?)');
   for (const s of day.suggest ?? []) if (s.kind === 'expand') insQueried.run(cc, date, s.prefix);
   db.prepare('INSERT OR REPLACE INTO days VALUES (?,?,?,?,?)')
@@ -71,10 +84,10 @@ function importDay(db, day) {
 }
 
 function importClassify(db, cc, file) {
-  const up = db.prepare('INSERT OR REPLACE INTO class VALUES (?,?,?,?,?,?,?)');
+  const up = db.prepare('INSERT OR REPLACE INTO class VALUES (?,?,?,?,?,?,?,?)');
   for (const [term, c] of Object.entries(file)) {
     up.run(cc, term, c.category, c.subgenre ?? null, c.difficulty ?? null,
-      JSON.stringify(c.topAppIds ?? []), c.classifiedAt);
+      JSON.stringify(c.topAppIds ?? []), c.classifiedAt, c.niche ? JSON.stringify(c.niche) : null);
   }
 }
 
@@ -85,16 +98,25 @@ function importApps(db, cc, file) {
   }
 }
 
-const PATHS = { days: dayPath, classify: classifyPath, apps: appsPath };
+function importStats(db, cc, file, date) {
+  const up = db.prepare('INSERT OR REPLACE INTO app_stats VALUES (?,?,?,?,?,?,?,?,?)');
+  const at = (row, f) => row[STATS_FIELDS.indexOf(f)] ?? null;
+  for (const [id, row] of Object.entries(file)) {
+    up.run(cc, Number(id), date, at(row, 'ratings'), at(row, 'ratingsCur'), at(row, 'stars'), at(row, 'version'), at(row, 'updated'), at(row, 'price'));
+  }
+}
+
+const PATHS = { days: dayPath, classify: classifyPath, apps: appsPath, stats: statsPath };
 const IMPORTERS = {
   days: (db, cc, v) => importDay(db, v),
   classify: importClassify,
   apps: importApps,
+  stats: importStats,
 };
 
 // Importa doar fisierele noi sau schimbate (dupa marime). Fisierele stricate ajung in `problems`.
 export function importAll(db, dataDir) {
-  const stats = { days: 0, classify: 0, apps: 0, problems: 0 };
+  const stats = { days: 0, classify: 0, apps: 0, stats: 0, problems: 0 };
   const done = db.prepare('SELECT size FROM imported WHERE kind=? AND date=? AND country=?');
   const mark = db.prepare('INSERT OR REPLACE INTO imported VALUES (?,?,?,?)');
   const problem = db.prepare('INSERT OR REPLACE INTO problems VALUES (?,?)');
@@ -112,7 +134,7 @@ export function importAll(db, dataDir) {
           continue;
         }
         tx(db, () => {
-          IMPORTERS[kind](db, cc, r.value);
+          IMPORTERS[kind](db, cc, r.value, date);
           mark.run(kind, date, cc, size);
         });
         stats[kind]++;

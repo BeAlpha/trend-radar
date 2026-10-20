@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseHints, parseSearch, parseChart, makeAppleClient } from '../src/apple/clients.js';
+import { parseHints, parseSearch, parseChart, parseAppMeta, parseIap, parseSimilar, parseReviews, makeAppleClient } from '../src/apple/clients.js';
 import { makeThrottle, makeRetry, makeCounter, HttpError } from '../src/apple/net.js';
 
 const HINTS = `<?xml version="1.0"?><plist version="1.0"><dict><key>title</key><string>Suggestions</string>
@@ -17,12 +17,12 @@ test('parseHints: ordine, decodare entitati, litere mici, fara dubluri', () => {
 
 test('parseSearch: gen principal si subgen de joc', () => {
   const r = parseSearch({ results: [
-    { trackId: 1, trackName: 'X', primaryGenreId: 6014, genreIds: ['6014', '7012', '6016'], userRatingCount: 5 },
+    { trackId: 1, trackName: 'X', primaryGenreId: 6014, genreIds: ['6014', '7012', '6016'], userRatingCount: 5, averageUserRating: 4.5, releaseDate: '2026-09-01T07:00:00Z' },
     { trackId: 2, trackName: 'Y', primaryGenreId: '6003', genreIds: ['6003'] },
   ] });
   assert.deepEqual(r, [
-    { id: 1, name: 'X', genreId: 6014, subgenreId: 7012, ratings: 5 },
-    { id: 2, name: 'Y', genreId: 6003, subgenreId: null, ratings: 0 },
+    { id: 1, name: 'X', genreId: 6014, subgenreId: 7012, ratings: 5, stars: 4.5, releaseDate: '2026-09-01' },
+    { id: 2, name: 'Y', genreId: 6003, subgenreId: null, ratings: 0, stars: null, releaseDate: null },
   ]);
 });
 
@@ -74,4 +74,32 @@ test('parseSubtitle: primul subtitlu din pagina (antetul app-ului)', async () =>
   const html = '<h1>X</h1><h2 class="subtitle svelte-kps97o">Explore, build &amp; craft</h2><p class="subtitle svelte-1">Altceva</p>';
   assert.equal(parseSubtitle(html), 'Explore, build & craft');
   assert.equal(parseSubtitle('<html></html>'), null);
+});
+
+test('parseAppMeta: date stabile + cifrele zilei', () => {
+  const [m] = parseAppMeta({ results: [{ trackId: 7, trackName: 'A', primaryGenreId: 6014, releaseDate: '2026-10-01T07:00:00Z',
+    sellerName: 'S', userRatingCount: 120, userRatingCountForCurrentVersion: 30, averageUserRating: 4.6789,
+    version: '1.2', currentVersionReleaseDate: '2026-10-15T10:00:00Z', price: 2.99 }] });
+  assert.deepEqual(m, { id: 7, name: 'A', genreId: 6014, releaseDate: '2026-10-01', seller: 'S',
+    ratings: 120, ratingsCur: 30, stars: 4.68, version: '1.2', updated: '2026-10-15', price: 2.99 });
+});
+
+test('parseIap / parseSimilar: din pagina web App Store', () => {
+  const html = `"hasInAppPurchases":true <ul><li><div class="text-pair svelte-1"><span>Premium &amp; More</span> <span>9,99\u00a0€</span> </div></li>
+    <li><div class="text-pair svelte-1"><span>Coins</span> <span>$1.99</span> </div></li></ul>
+    <section id="similarItems" data-test-id="shelf-wrapper"><a href="https://apps.apple.com/us/app/x/id11">x</a>
+    <a href="https://apps.apple.com/us/app/y/id5">self</a><a href="https://apps.apple.com/us/app/x/id11">x</a><a href="/us/app/z/id12">z</a></section>
+    <section data-test-id="shelf-wrapper"><a href="https://apps.apple.com/us/app/w/id99">alt raft</a></section>`;
+  assert.deepEqual(parseIap(html), { has: true, items: [{ name: 'Premium & More', price: '9,99 €' }, { name: 'Coins', price: '$1.99' }] });
+  assert.deepEqual(parseIap('<html></html>'), { has: false, items: [] });
+  assert.deepEqual(parseSimilar(html, 5), [11, 12]);
+  assert.deepEqual(parseSimilar('<html></html>', 5), []);
+});
+
+test('parseReviews: stele, text, versiune', () => {
+  const e = (n) => ({ id: { label: `r${n}` }, 'im:rating': { label: String(n) }, title: { label: `T${n}` }, content: { label: 'txt' },
+    'im:version': { label: '1.0' }, updated: { label: '2026-10-19T02:43:53-07:00' } });
+  assert.deepEqual(parseReviews({ feed: { entry: [e(1), e(5)] } }).map((r) => [r.stars, r.title, r.date]), [[1, 'T1', '2026-10-19'], [5, 'T5', '2026-10-19']]);
+  assert.deepEqual(parseReviews({ feed: { entry: e(3) } }).length, 1);
+  assert.deepEqual(parseReviews({ feed: {} }), []);
 });

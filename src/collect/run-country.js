@@ -1,10 +1,11 @@
 // Colectarea zilnica pentru O tara: sugestii -> extindere long-tail -> topuri -> clasificare.
 import { prefixesFor } from './prefixes.js';
-import { CHART_TYPES } from '../apple/clients.js';
+import { CHART_TYPES, NEW_FEEDS } from '../apple/clients.js';
 import { CHART_GENRES } from '../apple/genres.js';
 import { scoreDay, difficulty, categorize } from '../metrics/score.js';
 import { buildFromDays, applyClassifications } from '../metrics/build.js';
 import { newTerms, rising } from '../metrics/trends.js';
+import { nicheStats } from '../metrics/niche.js';
 import {
   dayPath, classifyPath, writeJsonGz, readCountryDays, readCountryClassifications,
 } from '../data/files.js';
@@ -32,13 +33,16 @@ export function expansionPrefixes(series, index, max) {
 
 // Cuvintele vazute azi, fara clasificare sau clasificate acum >30 zile; scor mare primele.
 // Cuvintele aparute recent (sau azi, inca neindexate) primele: pentru ele vrem app-urile cat mai repede.
-export function classificationQueue(index, todayScores, date) {
+// Apoi cele in crestere (`hot`) clasificate inainte de scorul de nisa: le refacem ca sa aiba concurenta.
+export function classificationQueue(index, todayScores, date, hot = new Set()) {
   const stale = addDays(date, -RECLASSIFY_DAYS);
   const recent = addDays(date, -NEW_PRIORITY_DAYS);
   const isNew = (t) => { const fs = index.get(t)?.firstSeen; return !fs || fs >= recent; };
+  const noNiche = (t) => hot.has(t) && !index.get(t)?.niche;
+  const rank = (t) => (isNew(t) ? 2 : noNiche(t) ? 1 : 0);
   return [...todayScores.keys()]
-    .filter((t) => { const c = index.get(t)?.classifiedAt; return !c || c <= stale; })
-    .sort((a, b) => isNew(b) - isNew(a) || todayScores.get(b) - todayScores.get(a));
+    .filter((t) => { const c = index.get(t)?.classifiedAt; return !c || c <= stale || noNiche(t); })
+    .sort((a, b) => rank(b) - rank(a) || todayScores.get(b) - todayScores.get(a));
 }
 
 export async function runCountry({
@@ -98,12 +102,26 @@ export async function runCountry({
     }
   }
 
-  // 3b. Data lansarii pentru app-urile noi din topuri (pentru "Aplicatii noi")
-  const appMeta = await collectAppMeta({ country, date, dataDir, apple, charts, log, stop, max: appMetaMax });
+  // 3b. Lansarile noi ale Apple (cele mai devreme semne: app-uri din prima zi)
+  const newFeed = [];
+  for (const type of NEW_FEEDS) {
+    if (stop()) break;
+    try {
+      newFeed.push({ type, apps: await apple.newFeed(country, type) });
+    } catch (err) {
+      log(`[${country}] rss ${type} esuat: ${err.message}`);
+    }
+  }
+
+  // 3c. Lookup: data lansarii (app-uri noi) + rating-urile zilei (toate) pentru "Aplicatii noi"
+  const appMeta = await collectAppMeta({
+    country, date, dataDir, apple, charts, extraIds: newFeed.flatMap((f) => f.apps.map((a) => a.id)), log, stop, max: appMetaMax,
+  });
 
   // 4. Clasificare pe categorii (in limita de timp; restul ramane pe maine)
   const todayScores = scoreDay(suggest);
-  const queue = classificationQueue(index, todayScores, date);
+  const hot = new Set(rising(series, 7).map((r) => r.term));
+  const queue = classificationQueue(index, todayScores, date, hot);
   const classified = {};
   const deadline = clock() + classifyMs;
   log(`[${country}] clasificare: ${queue.length} in coada`);
@@ -115,6 +133,7 @@ export async function runCountry({
         ...categorize(apps),
         difficulty: difficulty(apps.map((a) => a.ratings)),
         topAppIds: apps.map((a) => a.id),
+        niche: nicheStats(apps, term, date),
         classifiedAt: date,
       };
     } catch (err) {
@@ -126,14 +145,14 @@ export async function runCountry({
   // O rulare de proba acopera putine inceputuri: nu conteaza ca zi completa (ar strica trendurile).
   const complete = !smoke && !aborted && counter.failureRate() <= MAX_FAILURE_RATE && suggest.length > 0;
   writeJsonGz(dayPath(dataDir, date, country), {
-    date, country, complete, smoke, requests, errors: failures, suggest, charts,
+    date, country, complete, smoke, requests, errors: failures, suggest, charts, newFeed,
   });
   // Scris mereu (si gol), ca artefactul din GitHub sa pastreze structura data/days + data/classify.
   writeJsonGz(classifyPath(dataDir, date, country), classified);
 
   const summary = {
     country, date, complete, requests, errors: failures,
-    terms: todayScores.size, expanded: expand.length, charts: charts.length,
+    terms: todayScores.size, expanded: expand.length, charts: charts.length, newFeed: newFeed.reduce((n, f) => n + f.apps.length, 0),
     appMeta, classified: Object.keys(classified).length, queueLeft: queue.length - Object.keys(classified).length,
   };
   log(`[${country}] gata: ${JSON.stringify(summary)}`);

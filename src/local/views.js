@@ -1,9 +1,10 @@
 // Datele pentru interfata: serie + index din SQLite -> functiile pure din metrics/.
-import { COUNTRIES, CHART_TYPES } from '../apple/clients.js';
+import { COUNTRIES, CHART_TYPES, DOWNLOAD_TYPES } from '../apple/clients.js';
 import { genreName, GENRES } from '../apple/genres.js';
 import { newTerms, rising, falling, topTerms, disappeared, warmup } from '../metrics/trends.js';
 import { chartMovers, themes } from '../metrics/themes.js';
-import { addDays } from '../util/dates.js';
+import { addDays, diffDays } from '../util/dates.js';
+import { competition, opportunity } from '../metrics/niche.js';
 
 export const SERIES_DAYS = 45;
 export const MAX_ROWS = 1500;
@@ -118,7 +119,9 @@ export function makeViews(db) {
         const movers = [];
         for (const type of CHART_TYPES) {
           const today = chartList(cc, latest, type, g);
-          const pastLists = past.map((d) => chartList(cc, d, type, g));
+          // Un top colectat de curand n-are istoric: fara asta, toate app-urile din el ar parea "nou intrate".
+          const pastLists = past.map((d) => chartList(cc, d, type, g)).filter((l) => l.length);
+          if (!today.length || !pastLists.length) continue;
           const weekAgo = weekAgoDate ? chartList(cc, weekAgoDate, type, g) : null;
           movers.push(...chartMovers(today, pastLists, weekAgo).map((m) => ({ ...m, type })));
         }
@@ -147,6 +150,8 @@ export function makeViews(db) {
         subgenre: cls?.subgenre ? genreName(cls.subgenre) : null,
         difficulty: cls?.difficulty ?? null,
         topAppIds: cls ? JSON.parse(cls.top_app_ids) : [],
+        niche: cls?.niche ? JSON.parse(cls.niche) : null,
+        competition: cls?.niche ? competition(JSON.parse(cls.niche)) : null,
       };
     });
     return { term: t, countries: perCountry };
@@ -172,9 +177,32 @@ export function makeViews(db) {
     return out.sort((a, b) => b.score - a.score || a.position - b.position);
   }
 
+  // Rating-urile unui app: cate are acum si cate a primit pe zi (fata de cea mai veche zi din ultimele 7).
+  const statsSince = db.prepare('SELECT date, ratings, stars, price FROM app_stats WHERE country=? AND id=? AND date>=? AND date<=? ORDER BY date');
+  function ratingTrend(cc, id, latest) {
+    const pts = statsSince.all(cc, id, addDays(latest, -7), latest);
+    if (!pts.length) return { ratings: null, perDay: null, stars: null, price: null };
+    const now = pts.at(-1);
+    const then = pts[0];
+    const days = diffDays(now.date, then.date);
+    return {
+      ratings: now.ratings, stars: now.stars, price: now.price,
+      perDay: days > 0 ? Math.round(((now.ratings - then.ratings) / days) * 10) / 10 : null,
+    };
+  }
+
+  // Ziua din care urmarim topurile unei tari: "ajunsa in top in N zile" are sens doar pentru app-urile lansate dupa.
+  const trackStart = (cc) => db.prepare('SELECT MIN(date) d FROM charts WHERE country=?').get(cc).d;
+  const typeOk = (type) => (t) => (type === 'free' ? t === 'topfreeapplications'
+    : type === 'paid' ? t === 'toppaidapplications'
+      : type === 'grossing' ? t === 'topgrossingapplications' : true);
+
   // Aplicatii noi in topuri: lansate in ultimele `launched` zile si prezente in topurile de azi.
-  // Pentru fiecare: cel mai bun loc (si in ce top), urcarea fata de acum 7 zile in ACELASI top, in cate tari.
-  function newApps({ country = 'US', category = 'all', type = 'all', launched = 90, limit = MAX_ROWS }) {
+  // Pentru fiecare: cel mai bun loc (si in ce top), urcarea fata de acum 7 zile in ACELASI top, in cate tari,
+  // locul in topul incasarilor ("face bani"), rating-urile pe zi (semnul descarcarilor).
+  // source='feed': lansarile noi ale Apple care NU sunt (inca) in topuri, cele cu rating-uri rapide primele.
+  function newApps({ country = 'US', category = 'all', type = 'all', launched = 90, source = 'charts', limit = MAX_ROWS }) {
+    if (source === 'feed') return feedApps({ country, category, launched, limit });
     const ccs = country === 'ALL' ? COUNTRIES : [country];
     const days = Number(launched) || 90;
     const byId = new Map();
@@ -183,6 +211,7 @@ export function makeViews(db) {
       if (!latest) continue;
       const since = addDays(latest, -days);
       const weekAgo = addDays(latest, -7);
+      const start = trackStart(cc);
       const rows = db.prepare(`SELECT c.app_id id, c.type, c.genre_id, c.rank, c.name, m.genre_id app_genre,
           m.release_date, m.seller
         FROM charts c JOIN app_meta m ON m.country=c.country AND m.id=c.app_id
@@ -191,15 +220,18 @@ export function makeViews(db) {
       const chartThen = db.prepare('SELECT 1 FROM charts WHERE country=? AND date=? AND type=? AND genre_id=? LIMIT 1');
       const firstIn = db.prepare('SELECT MIN(date) d FROM charts WHERE country=? AND app_id=?');
       const best = new Map();
+      const gross = new Map(); // id -> cel mai bun loc in topul incasarilor
       for (const r of rows) {
-        if (type === 'free' && r.type !== 'topfreeapplications') continue;
-        if (type === 'paid' && r.type !== 'toppaidapplications') continue;
+        if (r.type === 'topgrossingapplications' && (!gross.has(r.id) || r.rank < gross.get(r.id).rank)) gross.set(r.id, r);
+        if (!typeOk(type)(r.type)) continue;
         const hist = !!chartThen.get(cc, weekAgo, r.type, r.genre_id);
+        const dl = DOWNLOAD_TYPES.includes(r.type);
         const b = best.get(r.id);
-        if (!b) best.set(r.id, { ...r, charts: 1, hist: hist ? r : null });
+        if (!b) best.set(r.id, { ...r, dl, charts: 1, hist: hist ? r : null });
         else {
           b.charts++;
-          if (r.rank < b.rank) Object.assign(b, { type: r.type, genre_id: r.genre_id, rank: r.rank });
+          // Cel mai bun loc se ia din topurile de descarcari; incasarile doar daca nu e in niciunul.
+          if ((dl && !b.dl) || (dl === b.dl && r.rank < b.rank)) Object.assign(b, { type: r.type, genre_id: r.genre_id, rank: r.rank, dl });
           if (hist && (!b.hist || r.rank < b.hist.rank)) b.hist = r;
         }
       }
@@ -207,42 +239,142 @@ export function makeViews(db) {
         // Urcarea se masoara in cel mai bun top care exista si acum 7 zile (topurile noi n-au inca istoric).
         const h = b.hist;
         const then = h ? rankThen.get(cc, weekAgo, h.type, h.genre_id, b.id)?.rank ?? null : null;
+        const since0 = firstIn.get(cc, b.id).d;
+        const g = gross.get(b.id);
         const entry = {
           country: cc, bestRank: b.rank, type: b.type, chartGenre: b.genre_id, charts: b.charts,
           climb: then == null ? null : then - h.rank, newInChart: !!h && then == null,
           climbChart: h && (h.type !== b.type || h.genre_id !== b.genre_id) ? { genre: h.genre_id, type: h.type, rank: h.rank } : null,
-          inTopSince: firstIn.get(cc, b.id).d,
+          inTopSince: since0,
+          daysToTop: b.release_date && b.release_date >= start ? Math.max(0, diffDays(since0, b.release_date)) : null,
+          gross: g ? { rank: g.rank, genre: g.genre_id } : null,
+          ...ratingTrend(cc, b.id, latest),
         };
         const cur = byId.get(b.id);
         if (!cur) {
-          byId.set(b.id, { id: b.id, name: b.name, seller: b.seller, genreId: b.app_genre, releaseDate: b.release_date, best: entry, countries: [cc] });
+          byId.set(b.id, { id: b.id, name: b.name, seller: b.seller, genreId: b.app_genre, releaseDate: b.release_date, best: entry, all: [entry] });
         } else {
-          cur.countries.push(cc);
+          cur.all.push(entry);
           if (entry.bestRank < cur.best.bestRank) cur.best = entry;
         }
       }
     }
-    let out = [...byId.values()].map((a) => ({
-      id: a.id, name: a.name, seller: a.seller, releaseDate: a.releaseDate,
-      genreId: a.genreId, categoryName: genreName(a.genreId),
-      country: a.best.country, countries: a.countries, countryCount: a.countries.length,
-      bestRank: a.best.bestRank, type: a.best.type, bestChartName: genreName(a.best.chartGenre),
-      climb: a.best.climb, newInChart: a.best.newInChart,
-      climbChartName: a.best.climbChart ? `${genreName(a.best.climbChart.genre)} #${a.best.climbChart.rank}` : null, charts: a.best.charts, inTopSince: a.best.inTopSince,
-    }));
+    let out = [...byId.values()].map((a) => {
+      const g = a.all.filter((e) => e.gross).sort((x, y) => x.gross.rank - y.gross.rank)[0];
+      const perDays = a.all.map((e) => e.perDay).filter((v) => v != null);
+      const dtt = a.all.map((e) => e.daysToTop).filter((v) => v != null);
+      return {
+        id: a.id, name: a.name, seller: a.seller, releaseDate: a.releaseDate,
+        genreId: a.genreId, categoryName: genreName(a.genreId),
+        country: a.best.country, countries: a.all.map((e) => e.country), countryCount: a.all.length,
+        bestRank: a.best.bestRank, type: a.best.type, bestChartName: genreName(a.best.chartGenre),
+        climb: a.best.climb, newInChart: a.best.newInChart,
+        climbChartName: a.best.climbChart ? `${genreName(a.best.climbChart.genre)} #${a.best.climbChart.rank}` : null,
+        charts: a.best.charts, inTopSince: a.best.inTopSince,
+        daysToTop: dtt.length ? Math.min(...dtt) : null,
+        grossRank: g ? g.gross.rank : null, grossChartName: g ? genreName(g.gross.genre) : null, grossCountry: g?.country ?? null,
+        grossCountries: a.all.filter((e) => e.gross).length,
+        ratings: a.all.reduce((n, e) => n + (e.ratings ?? 0), 0),
+        ratingsPerDay: perDays.length ? Math.round(perDays.reduce((n, v) => n + v, 0) * 10) / 10 : null,
+        stars: a.best.stars, price: a.best.price,
+      };
+    });
     if (category !== 'all' && category != null && category !== '') out = out.filter((a) => a.genreId === Number(category));
     out.sort((a, b) => b.countryCount - a.countryCount || a.bestRank - b.bestRank);
     return { total: out.length, rows: out.slice(0, limit) };
   }
 
-  // Locul cel mai bun in topuri, pe zile, pentru graficul de pe pagina aplicatiei.
+  // Lansarile noi ale Apple (din prima zi) care inca nu sunt in topurile urmarite.
+  function feedApps({ country = 'US', category = 'all', launched = 90, limit = MAX_ROWS }) {
+    const ccs = country === 'ALL' ? COUNTRIES : [country];
+    const days = Number(launched) || 90;
+    const byId = new Map();
+    for (const cc of ccs) {
+      const latest = db.prepare('SELECT MAX(date) d FROM days WHERE country=?').get(cc).d;
+      if (!latest) continue;
+      const inCharts = new Set(db.prepare('SELECT DISTINCT app_id FROM charts WHERE country=? AND date=?').all(cc, latest).map((r) => r.app_id));
+      const rows = db.prepare(`SELECT f.app_id id, MIN(f.date) first_feed, MAX(f.date) last_feed, MAX(f.type) type,
+          m.name, m.genre_id, m.release_date, m.seller
+        FROM new_feed f JOIN app_meta m ON m.country=f.country AND m.id=f.app_id
+        WHERE f.country=? AND f.date>=? GROUP BY f.app_id`).all(cc, addDays(latest, -days));
+      for (const r of rows) {
+        if (inCharts.has(r.id)) continue;
+        const entry = { country: cc, firstInFeed: r.first_feed, type: r.type, ...ratingTrend(cc, r.id, latest) };
+        const cur = byId.get(r.id);
+        if (!cur) byId.set(r.id, { r, all: [entry] });
+        else cur.all.push(entry);
+      }
+    }
+    let out = [...byId.values()].map(({ r, all }) => {
+      const perDays = all.map((e) => e.perDay).filter((v) => v != null);
+      const best = [...all].sort((x, y) => (y.perDay ?? -1) - (x.perDay ?? -1) || (y.ratings ?? 0) - (x.ratings ?? 0))[0];
+      return {
+        id: r.id, name: r.name, seller: r.seller, releaseDate: r.release_date, genreId: r.genre_id, categoryName: genreName(r.genre_id),
+        country: best.country, countries: all.map((e) => e.country), countryCount: all.length,
+        type: r.type === 'newpaidapplications' ? 'toppaidapplications' : 'topfreeapplications',
+        firstInFeed: all.map((e) => e.firstInFeed).sort()[0],
+        ratings: all.reduce((n, e) => n + (e.ratings ?? 0), 0),
+        ratingsPerDay: perDays.length ? Math.round(perDays.reduce((n, v) => n + v, 0) * 10) / 10 : null,
+        stars: best.stars, price: best.price,
+      };
+    });
+    if (category !== 'all' && category != null && category !== '') out = out.filter((a) => a.genreId === Number(category));
+    out.sort((a, b) => (b.ratingsPerDay ?? -1) - (a.ratingsPerDay ?? -1) || b.ratings - a.ratings || (b.releaseDate ?? '').localeCompare(a.releaseDate ?? ''));
+    return { total: out.length, rows: out.slice(0, limit) };
+  }
+
+  // Pentru graficele de pe pagina aplicatiei: locul in topurile de descarcari, in topul incasarilor si rating-urile, pe zile.
   function appRanks(appId) {
     const id = Number(appId);
-    return COUNTRIES.map((cc) => ({
-      country: cc,
-      points: db.prepare('SELECT date, MIN(rank) score FROM charts WHERE app_id=? AND country=? GROUP BY date ORDER BY date')
-        .all(id, cc).map((r) => ({ date: r.date, score: r.score })),
-    }));
+    const q = (types) => db.prepare(`SELECT date, MIN(rank) score FROM charts WHERE app_id=? AND country=?
+      AND type IN (${types.map(() => '?').join(',')}) GROUP BY date ORDER BY date`);
+    const dl = q(DOWNLOAD_TYPES);
+    const gr = q(['topgrossingapplications']);
+    const st = db.prepare('SELECT date, ratings score FROM app_stats WHERE id=? AND country=? ORDER BY date');
+    const pts = (rows) => rows.map((r) => ({ date: r.date, score: r.score }));
+    return {
+      downloads: COUNTRIES.map((cc) => ({ country: cc, points: pts(dl.all(id, cc, ...DOWNLOAD_TYPES)) })),
+      grossing: COUNTRIES.map((cc) => ({ country: cc, points: pts(gr.all(id, cc, 'topgrossingapplications')) })),
+      ratings: COUNTRIES.map((cc) => ({ country: cc, points: pts(st.all(id, cc)) })),
+    };
+  }
+
+  // Nise calde: cuvintele noi si cele in crestere, cu concurenta din primele 10 app-uri si cine face bani acolo.
+  function nicheView({ country = 'US', category = 'all', period = 14, brands = false, limit = MAX_ROWS }) {
+    const ccs = country === 'ALL' ? COUNTRIES : [country];
+    const p = Number(period) || 14;
+    const rows = [];
+    for (const cc of ccs) {
+      const { series, index } = ctx(cc);
+      const latestChart = db.prepare('SELECT MAX(date) d FROM charts WHERE country=?').get(cc).d;
+      const grossing = new Set(db.prepare("SELECT DISTINCT app_id FROM charts WHERE country=? AND date=? AND type='topgrossingapplications'")
+        .all(cc, latestChart).map((r) => r.app_id));
+      const fresh = db.prepare('SELECT release_date FROM app_meta WHERE country=? AND id=?');
+      const nicheOf = db.prepare('SELECT niche FROM class WHERE country=? AND term=?');
+      const cand = new Map();
+      for (const r of newTerms(series, index, p)) cand.set(r.term, { ...r, isNew: true, delta: null });
+      for (const r of rising(series, 7)) if (!cand.has(r.term)) cand.set(r.term, { ...r, isNew: false });
+      const recent = series.dates.length ? addDays(series.dates.at(-1), -180) : null;
+      for (const r of cand.values()) {
+        const i = index.get(r.term) ?? {};
+        const nRow = nicheOf.get(cc, r.term)?.niche;
+        const niche = nRow ? JSON.parse(nRow) : null;
+        const comp = competition(niche);
+        const top = i.topAppIds ?? [];
+        const moneyApps = top.filter((id) => grossing.has(id));
+        const newApps = top.filter((id) => { const d = fresh.get(cc, id)?.release_date; return d && recent && d >= recent; });
+        rows.push(enrich(cc, index, {
+          term: r.term, score: r.score, delta: r.delta ?? null, isNew: r.isNew, firstSeen: r.firstSeen ?? null,
+          preliminary: r.preliminary ?? false,
+          competition: comp, brand: !!niche?.brand, opportunity: opportunity({ score: r.score, delta: r.delta, isNew: r.isNew, comp, brand: niche?.brand }),
+          niche, moneyApps: moneyApps.length, freshApps: niche ? niche.fresh : newApps.length,
+          apps: top.slice(0, 3), moneyIds: moneyApps.slice(0, 3),
+        }));
+      }
+    }
+    const out = rows.filter(matchCategory(category)).filter((r) => brands || !r.brand)
+      .sort((a, b) => (b.opportunity ?? -1) - (a.opportunity ?? -1) || b.score - a.score);
+    return { total: out.length, rows: out.slice(0, limit), measured: out.filter((r) => r.competition != null).length };
   }
 
   function suggestTerms(q) {
@@ -274,7 +406,7 @@ export function makeViews(db) {
   }
 
   return {
-    view, themeView, termView, suggestTerms, appKeywords, newApps, appRanks, categories, status,
+    view, themeView, termView, suggestTerms, appKeywords, newApps, appRanks, nicheView, categories, status,
     invalidate: () => { version++; cache.clear(); },
   };
 }

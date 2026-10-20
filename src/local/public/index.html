@@ -11,6 +11,7 @@
   <aside class="side">
     <div class="brand">Trend<span>Radar</span></div>
     <nav id="nav">
+      <a data-view="niches"><b>Nișe calde</b><small>cerere nouă, concurență mică</small></a>
       <a data-view="new" class="active"><b>Nou</b><small>cuvinte apărute recent</small></a>
       <a data-view="rising"><b>În creștere</b><small>scorul urcă</small></a>
       <a data-view="top"><b>Top trafic</b><small>cele mai căutate</small></a>
@@ -41,9 +42,16 @@
       </label>
       <label id="f-type-wrap">Top
         <select id="f-type">
-          <option value="all">Gratuite + plătite</option>
+          <option value="all">Toate topurile</option>
           <option value="free">Doar gratuite</option>
           <option value="paid">Doar plătite</option>
+          <option value="grossing">Doar topul încasărilor (fac bani)</option>
+        </select>
+      </label>
+      <label id="f-source-wrap">Sursa
+        <select id="f-source">
+          <option value="charts">Deja în topuri</option>
+          <option value="feed">Abia lansate, încă în afara topului</option>
         </select>
       </label>
       <label id="f-origin-wrap">Tip

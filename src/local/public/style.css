@@ -147,3 +147,20 @@ td .meta { font-size: 12px; font-weight: 400; color: var(--text-muted); }
 td.appname { white-space: normal; min-width: 180px; max-width: 320px; font-weight: 600; }
 td.appname a { cursor: pointer; text-decoration: none; }
 td.appname a:hover { text-decoration: underline; }
+
+/* Semnale de bani, nise, recenzii */
+.badge.money { background: #3a3110; color: #f5d36b; }
+.badge.bad { background: #3d1c1c; color: #f2a3a3; }
+.scorebar.opp i { background: #f5b642; }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.tabs .chip { cursor: pointer; }
+table.compact td { padding: 6px 4px; }
+.dist-row { display: grid; grid-template-columns: 34px 1fr 34px; gap: 8px; align-items: center; font-size: 13px; margin: 3px 0; }
+.dist-bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
+.dist-bar i { display: block; height: 100%; background: #4fb37a; border-radius: 4px; }
+.dist-bar i.bad { background: #e06c6c; }
+.words { display: flex; flex-wrap: wrap; gap: 6px; }
+.review { border-top: 1px solid var(--line); padding: 8px 0; font-size: 13px; }
+.review b { color: #f5c542; font-weight: 600; letter-spacing: 1px; }
+.reviews-grid h4 { margin: 14px 0 8px; font-size: 13px; }
+.review b .off { color: var(--line); }

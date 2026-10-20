@@ -3,7 +3,11 @@ import { HttpError, makeThrottle, makeRetry, makeCounter } from './net.js';
 
 export const COUNTRIES = ['US', 'GB', 'DE', 'FR', 'IT', 'ES'];
 export const STOREFRONTS = { US: 143441, GB: 143444, DE: 143443, FR: 143442, IT: 143450, ES: 143454 };
-export const CHART_TYPES = ['topfreeapplications', 'toppaidapplications'];
+export const CHART_TYPES = ['topfreeapplications', 'toppaidapplications', 'topgrossingapplications'];
+// Topurile de descarcari (fara incasari): pentru "cel mai bun loc" al unui app.
+export const DOWNLOAD_TYPES = ['topfreeapplications', 'toppaidapplications'];
+// Lansarile noi ale Apple (o lista pe tara, genul e ignorat de Apple).
+export const NEW_FEEDS = ['newfreeapplications', 'newpaidapplications'];
 
 const HINTS_URL = 'https://search.itunes.apple.com/WebObjects/MZSearchHints.woa/wa/hints?clientApplication=Software&term=';
 
@@ -29,6 +33,8 @@ export function parseSearch(json) {
     genreId: Number(r.primaryGenreId),
     subgenreId: (r.genreIds ?? []).map(Number).find((g) => g >= 7000 && g < 8000) ?? null,
     ratings: r.userRatingCount ?? 0,
+    stars: r.averageUserRating ?? null,
+    releaseDate: r.releaseDate ? r.releaseDate.slice(0, 10) : null,
   }));
 }
 
@@ -44,7 +50,7 @@ export function parseChart(json) {
   }));
 }
 
-// Date stabile ale unui app, pentru "Aplicatii noi": in primul rand data lansarii.
+// Lookup in loturi: datele stabile (data lansarii etc.) + cifrele zilei (rating-uri, versiune, pret).
 export function parseAppMeta(json) {
   return (json.results ?? []).filter((r) => r.trackId).map((r) => ({
     id: r.trackId,
@@ -52,6 +58,12 @@ export function parseAppMeta(json) {
     genreId: Number(r.primaryGenreId) || null,
     releaseDate: r.releaseDate ? r.releaseDate.slice(0, 10) : null,
     seller: r.sellerName ?? r.artistName ?? '',
+    ratings: r.userRatingCount ?? 0,
+    ratingsCur: r.userRatingCountForCurrentVersion ?? 0,
+    stars: r.averageUserRating == null ? null : Math.round(r.averageUserRating * 100) / 100,
+    version: r.version ?? '',
+    updated: r.currentVersionReleaseDate ? r.currentVersionReleaseDate.slice(0, 10) : null,
+    price: r.price ?? 0,
   }));
 }
 
@@ -90,6 +102,42 @@ export function parseSubtitle(html) {
   return m ? decodeXml(m[1]).trim() : null;
 }
 
+// Cumparaturile din aplicatie (Apple arata primele ~10, cu pret): perechi nume / pret din "Informatii".
+export function parseIap(html) {
+  const out = [];
+  const re = /<div class="text-pair[^"]*"><span>([^<]*)<\/span>\s*<span>([^<]*)<\/span>/g;
+  for (let m; (m = re.exec(html));) out.push({ name: decodeXml(m[1]).trim(), price: decodeXml(m[2]).replace(/\u00a0/g, ' ').trim() });
+  return { has: /"hasInAppPurchases":true/.test(html) || out.length > 0, items: out };
+}
+
+// "Ti-ar mai placea" de pe pagina app-ului: app-urile pe care le cumpara aceiasi oameni (aceeasi nisa).
+export function parseSimilar(html, selfId) {
+  const start = html.indexOf('id="similarItems"');
+  if (start < 0) return [];
+  const end = html.indexOf('data-test-id="shelf-wrapper"', start + 50);
+  const seg = html.slice(start, end > 0 ? end : undefined);
+  const ids = [];
+  for (const m of seg.matchAll(/\/app\/[^"/]*\/id(\d+)/g)) {
+    const id = Number(m[1]);
+    if (id !== Number(selfId) && !ids.includes(id)) ids.push(id);
+  }
+  return ids.slice(0, 15);
+}
+
+// Recenziile recente (RSS, 50 pe pagina).
+export function parseReviews(json) {
+  let e = json?.feed?.entry ?? [];
+  if (!Array.isArray(e)) e = [e];
+  return e.filter((x) => x['im:rating']).map((x) => ({
+    id: x.id?.label ?? '',
+    stars: Number(x['im:rating'].label),
+    title: x.title?.label ?? '',
+    text: x.content?.label ?? '',
+    version: x['im:version']?.label ?? '',
+    date: (x.updated?.label ?? '').slice(0, 10),
+  }));
+}
+
 // Throttle-uri separate: hints/RSS tolereaza ~50/min, iTunes Search ~20/min.
 export function makeAppleClient({
   fetchImpl = fetch,
@@ -124,6 +172,10 @@ export function makeAppleClient({
       const url = `https://itunes.apple.com/${country.toLowerCase()}/rss/${type}/limit=100/genre=${genreId}/json`;
       return call(light, 'rss', url, {}, async (r) => parseChart(await r.json()));
     },
+    newFeed(country, type) {
+      const url = `https://itunes.apple.com/${country.toLowerCase()}/rss/${type}/limit=100/json`;
+      return call(light, 'rss', url, {}, async (r) => parseChart(await r.json()));
+    },
     async appDetail(id, country) {
       const url = `https://itunes.apple.com/lookup?id=${id}&country=${country.toLowerCase()}`;
       const detail = await call(heavy, 'lookup', url, {}, async (r) => parseAppDetail((await r.json()).results?.[0]));
@@ -131,15 +183,23 @@ export function makeAppleClient({
       try {
         const res = await fetchImpl(`https://apps.apple.com/${country.toLowerCase()}/app/id${id}`,
           { headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 Safari/605.1.15' } });
-        detail.subtitle = res.ok ? parseSubtitle(await res.text()) : null;
+        const html = res.ok ? await res.text() : '';
+        detail.subtitle = html ? parseSubtitle(html) : null;
+        detail.iap = html ? parseIap(html) : null;
+        detail.similarIds = html ? parseSimilar(html, id) : [];
       } catch {
-        detail.subtitle = null; // pagina web e optionala; restul metadatelor raman
+        // pagina web e optionala; restul metadatelor raman
+        Object.assign(detail, { subtitle: null, iap: null, similarIds: [] });
       }
       return detail;
     },
     appMeta(ids, country) {
       const url = `https://itunes.apple.com/lookup?id=${ids.join(',')}&country=${country.toLowerCase()}`;
       return call(heavy, 'lookup', url, {}, async (r) => parseAppMeta(await r.json()));
+    },
+    reviews(id, country, page = 1) {
+      const url = `https://itunes.apple.com/${country.toLowerCase()}/rss/customerreviews/page=${page}/id=${id}/sortBy=mostRecent/json`;
+      return call(light, 'reviews', url, {}, async (r) => parseReviews(await r.json()));
     },
     lookup(ids, country) {
       const url = `https://itunes.apple.com/lookup?id=${ids.join(',')}&country=${country.toLowerCase()}`;

@@ -2,6 +2,7 @@
 //   data/days/<date>/<CC>.json.gz      sugestii + topuri ale zilei
 //   data/classify/<date>/<CC>.json.gz  cuvintele clasificate in acea zi
 //   data/apps/<date>/<CC>.json.gz      app-urile din topuri vazute prima data in acea zi (data lansarii etc.)
+//   data/stats/<date>/<CC>.json.gz     cifrele zilei pentru app-urile din topuri: rating-uri, versiune, pret
 import fs from 'node:fs';
 import path from 'node:path';
 import { gzipSync, gunzipSync } from 'node:zlib';
@@ -10,6 +11,7 @@ import { isDate } from '../util/dates.js';
 export const dayPath = (dataDir, date, cc) => path.join(dataDir, 'days', date, `${cc}.json.gz`);
 export const classifyPath = (dataDir, date, cc) => path.join(dataDir, 'classify', date, `${cc}.json.gz`);
 export const appsPath = (dataDir, date, cc) => path.join(dataDir, 'apps', date, `${cc}.json.gz`);
+export const statsPath = (dataDir, date, cc) => path.join(dataDir, 'stats', date, `${cc}.json.gz`);
 
 export function writeJsonGz(file, obj) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
