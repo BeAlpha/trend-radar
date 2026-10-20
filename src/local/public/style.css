@@ -122,7 +122,14 @@ td.term a:hover { text-decoration: underline; }
 .desc { color: var(--text-secondary); font-size: 13px; max-height: 420px; overflow: auto; white-space: normal; }
 .desc.short { max-height: 160px; }
 .shots { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; }
-.shots img { height: 380px; border-radius: 14px; flex: none; }
+.shots img { height: 420px; border-radius: 14px; flex: none; cursor: zoom-in; background: var(--line); }
+#lightbox { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.88); display: flex; align-items: center; justify-content: center; cursor: zoom-out; }
+#lightbox[hidden] { display: none; }
+#lightbox img { max-width: calc(100vw - 140px); max-height: calc(100vh - 60px); border-radius: 16px; }
+.lb-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(255,255,255,.12); color: #fff; border: 0; font-size: 40px; width: 52px; height: 72px; border-radius: 12px; cursor: pointer; }
+.lb-nav:hover { background: rgba(255,255,255,.22); }
+.lb-nav.prev { left: 16px; } .lb-nav.next { right: 16px; }
+.lb-count { position: absolute; bottom: 14px; color: #ccc; font-size: 13px; }
 .hidden-kw { border-top: 1px solid var(--line); font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .badge.src-title, .badge.src-subtitle, .badge.src-both { background: #16301f; color: #8fe0b2; }
 .badge.src-partial { background: #3a2c12; color: #f3c46d; }

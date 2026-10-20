@@ -451,6 +451,7 @@ async function renderApp() {
       </div>
     </div>
 
+    ${shotsCard(d)}
     <div class="grid2" style="margin-top:14px">
       <div class="card">
         <div class="panel-head">
@@ -475,10 +476,51 @@ async function renderApp() {
       </div>
     </div>
     <div class="card panel" style="margin-top:14px"><h3>Locul în topuri, zi de zi ${q('Cel mai bun loc al aplicației în topurile urmărite (top 100 gratuite/plătite pe categorii), pe fiecare țară. #1 = sus. Linia se rupe în zilele în care nu era în niciun top.')}</h3><div class="chart" id="rank-chart"></div></div>
-    ${d.screenshots.length ? `<div class="card panel" style="margin-top:14px"><h3>Screenshot-uri</h3><div class="shots">${d.screenshots.map((u) => `<img src="${esc(u)}" alt="" loading="lazy">`).join('')}</div></div>` : ''}`;
+`;
   lineChart($('#rank-chart'), r.ranks, tip, { rank: true, empty: 'Aplicația n-a fost în topurile urmărite (top 100 pe categorii) în zilele colectate.' });
   bindApp();
 }
+
+// Screenshot-urile: iPhone (sau iPad daca n-are), la rezolutie mare; click = marire.
+const shotUrl = (u, px) => u.replace(/\/\d+x\d+bb\.\w+$/, `/${px}x${px}bb.jpg`);
+function shotsCard(d) {
+  const ipad = !d.screenshots.length;
+  const list = ipad ? d.ipadScreenshots : d.screenshots;
+  if (!list.length) return '<div class="card panel" style="margin-top:14px"><h3>Screenshot-uri</h3><div class="empty">Aplicația nu are screenshot-uri publice în această țară.</div></div>';
+  state.shots = list;
+  return `<div class="card panel" style="margin-top:14px">
+    <h3>Screenshot-uri <span class="muted small">${list.length}${ipad ? ' · iPad' : ''} · click pentru mărire</span></h3>
+    <div class="shots">${list.map((u, i) => `<img src="${esc(shotUrl(u, 800))}" data-shot="${i}" alt="Screenshot ${i + 1}" loading="lazy">`).join('')}</div></div>`;
+}
+
+function openShot(i) {
+  const n = state.shots.length;
+  i = (i + n) % n;
+  let box = $('#lightbox');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'lightbox';
+    box.innerHTML = '<button class="lb-nav prev" aria-label="Înapoi">‹</button><img alt=""><button class="lb-nav next" aria-label="Înainte">›</button><div class="lb-count"></div>';
+    document.body.append(box);
+    box.addEventListener('click', (e) => {
+      if (e.target.closest('.prev')) return openShot(Number(box.dataset.i) - 1);
+      if (e.target.closest('.next')) return openShot(Number(box.dataset.i) + 1);
+      closeShot();
+    });
+  }
+  box.dataset.i = i;
+  box.querySelector('img').src = shotUrl(state.shots[i], 2000);
+  box.querySelector('.lb-count').textContent = `${i + 1} / ${n}`;
+  box.hidden = false;
+}
+function closeShot() { const b = $('#lightbox'); if (b) b.hidden = true; }
+document.addEventListener('keydown', (e) => {
+  const b = $('#lightbox');
+  if (!b || b.hidden) return;
+  if (e.key === 'Escape') closeShot();
+  if (e.key === 'ArrowRight') openShot(Number(b.dataset.i) + 1);
+  if (e.key === 'ArrowLeft') openShot(Number(b.dataset.i) - 1);
+});
 
 function countryChips() {
   return ['US', 'GB', 'DE', 'FR', 'IT', 'ES'].map((c) => `<button type="button" class="chip ${c === state.appCountry ? 'on' : ''}" data-cc="${c}">${c}</button>`).join('');
@@ -489,6 +531,7 @@ function bindApp() {
   document.querySelectorAll('.chip[data-cc]').forEach((b) => b.addEventListener('click', () => {
     state.appCountry = b.dataset.cc; remember(); renderApp().catch(showError);
   }));
+  document.querySelectorAll('img[data-shot]').forEach((img) => img.addEventListener('click', () => openShot(Number(img.dataset.shot))));
   $('#kw-all')?.addEventListener('change', (e) => { state.appKwAll = e.target.checked; remember(); renderApp().catch(showError); });
 }
 
