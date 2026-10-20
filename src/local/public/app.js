@@ -40,7 +40,7 @@ const HELP = {
   origin: 'Apărut = cuvântul a ieșit nou în sugestiile principale (după 1–2 litere) sau într-o căutare mai adâncă pe care o mai făcusem înainte și unde nu era. Acesta e trendul real. Descoperit = găsit prima dată când am căutat mai adânc după un cuvânt (ex. „ai photo …”): e nou pentru noi, dar lumea îl putea căuta și înainte.',
   releaseDate: 'Data primei lansări în App Store (de la Apple).',
   bestRank: 'Cel mai bun loc de azi în topurile pe care le urmărim (top 100 gratuite/plătite, pe categorii și subcategorii de jocuri). Lângă el: în ce top și în ce țară.',
-  climb: 'Cu câte locuri a urcat față de acum 7 zile în același top. „nou în top” = acum 7 zile nu era în acel top.',
+  climb: 'Cu câte locuri a urcat față de acum 7 zile în același top. „nou în top” = acum 7 zile nu era în acel top. Dacă cel mai bun loc e într-un top colectat de curând, urcarea se arată în topul mai larg (scris dedesubt).',
   countryCount: 'În câte din cele 6 țări e în topuri azi. Un app nou prezent în multe țări e un succes serios.',
   inTopSince: 'Prima zi în care l-am văzut în vreun top în această țară (urmărim topurile din 12 oct 2026).',
   apps: 'Primele app-uri din căutarea App Store pentru acest cuvânt. Click pe iconiță = pagina aplicației. „în coadă” = cuvântul încă nu a fost clasificat; deschide cuvântul ca să vezi app-urile acum.',
@@ -112,8 +112,12 @@ function cell(col, r) {
     case 'name': return `<td class="appname"><a data-app="${r.id}" data-app-country="${r.country}" class="applink">${esc(r.name)}</a><div class="meta muted">${esc(r.seller)}</div></td>`;
     case 'releaseDate': return v ? `<td>${esc(fmtDate(v))} <span class="muted">· ${ago(v)}</span></td>` : '<td>–</td>';
     case 'bestRank': return `<td class="num"><b>#${v}</b><div class="meta muted">${esc(r.bestChartName)} · ${r.type === 'toppaidapplications' ? 'plătite' : 'gratuite'} · ${r.country}</div></td>`;
-    case 'climb': return r.newInChart ? '<td class="num"><span class="badge new">nou în top</span></td>'
-      : `<td class="num ${v > 0 ? 'up' : v < 0 ? 'down' : ''}">${v > 0 ? '+' : ''}${v}</td>`;
+    case 'climb': {
+      const where = r.climbChartName ? `<div class="meta muted">în ${esc(r.climbChartName)}</div>` : '';
+      if (r.newInChart) return `<td class="num"><span class="badge new">nou în top</span>${where}</td>`;
+      if (v == null) return '<td class="num muted" data-tip="Topul ăsta îl colectăm de curând; urcarea apare după 7 zile.">–</td>';
+      return `<td class="num ${v > 0 ? 'up' : v < 0 ? 'down' : ''}">${v > 0 ? '+' : ''}${v}${where}</td>`;
+    }
     case 'countryCount': return `<td class="num" data-tip="${esc(r.countries.join(', '))}">${v}/6</td>`;
     case 'inTopSince': return v ? `<td>${esc(fmtDay(v))}</td>` : '<td>–</td>';
     case 'seenOf': return `<td class="num"><span class="badge ${r.seenDays >= 2 ? 'ok' : 'new'}">${r.seenDays}/${r.ofDays} ${r.ofDays === 1 ? 'zi' : 'zile'}</span></td>`;

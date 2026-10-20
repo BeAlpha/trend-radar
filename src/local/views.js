@@ -188,20 +188,29 @@ export function makeViews(db) {
         FROM charts c JOIN app_meta m ON m.country=c.country AND m.id=c.app_id
         WHERE c.country=? AND c.date=? AND m.release_date>=?`).all(cc, latest, since);
       const rankThen = db.prepare('SELECT rank FROM charts WHERE country=? AND date=? AND type=? AND genre_id=? AND app_id=?');
+      const chartThen = db.prepare('SELECT 1 FROM charts WHERE country=? AND date=? AND type=? AND genre_id=? LIMIT 1');
       const firstIn = db.prepare('SELECT MIN(date) d FROM charts WHERE country=? AND app_id=?');
       const best = new Map();
       for (const r of rows) {
         if (type === 'free' && r.type !== 'topfreeapplications') continue;
         if (type === 'paid' && r.type !== 'toppaidapplications') continue;
+        const hist = !!chartThen.get(cc, weekAgo, r.type, r.genre_id);
         const b = best.get(r.id);
-        if (!b) best.set(r.id, { ...r, charts: 1 });
-        else { b.charts++; if (r.rank < b.rank) Object.assign(b, { type: r.type, genre_id: r.genre_id, rank: r.rank }); }
+        if (!b) best.set(r.id, { ...r, charts: 1, hist: hist ? r : null });
+        else {
+          b.charts++;
+          if (r.rank < b.rank) Object.assign(b, { type: r.type, genre_id: r.genre_id, rank: r.rank });
+          if (hist && (!b.hist || r.rank < b.hist.rank)) b.hist = r;
+        }
       }
       for (const b of best.values()) {
-        const then = rankThen.get(cc, weekAgo, b.type, b.genre_id, b.id)?.rank ?? null;
+        // Urcarea se masoara in cel mai bun top care exista si acum 7 zile (topurile noi n-au inca istoric).
+        const h = b.hist;
+        const then = h ? rankThen.get(cc, weekAgo, h.type, h.genre_id, b.id)?.rank ?? null : null;
         const entry = {
           country: cc, bestRank: b.rank, type: b.type, chartGenre: b.genre_id, charts: b.charts,
-          climb: then == null ? null : then - b.rank, newInChart: then == null,
+          climb: then == null ? null : then - h.rank, newInChart: !!h && then == null,
+          climbChart: h && (h.type !== b.type || h.genre_id !== b.genre_id) ? { genre: h.genre_id, type: h.type, rank: h.rank } : null,
           inTopSince: firstIn.get(cc, b.id).d,
         };
         const cur = byId.get(b.id);
@@ -218,7 +227,8 @@ export function makeViews(db) {
       genreId: a.genreId, categoryName: genreName(a.genreId),
       country: a.best.country, countries: a.countries, countryCount: a.countries.length,
       bestRank: a.best.bestRank, type: a.best.type, bestChartName: genreName(a.best.chartGenre),
-      climb: a.best.climb, newInChart: a.best.newInChart, charts: a.best.charts, inTopSince: a.best.inTopSince,
+      climb: a.best.climb, newInChart: a.best.newInChart,
+      climbChartName: a.best.climbChart ? `${genreName(a.best.climbChart.genre)} #${a.best.climbChart.rank}` : null, charts: a.best.charts, inTopSince: a.best.inTopSince,
     }));
     if (category !== 'all' && category != null && category !== '') out = out.filter((a) => a.genreId === Number(category));
     out.sort((a, b) => b.countryCount - a.countryCount || a.bestRank - b.bestRank);

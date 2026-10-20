@@ -145,3 +145,23 @@ test('newApps: lansate recent, cel mai bun loc, urcare pe 7 zile, in cate tari',
   const ranks = v.appRanks(2);
   assert.deepEqual(ranks.find((s) => s.country === 'US').points.map((p) => [p.date, p.score]), [['2026-01-02', 50], ['2026-01-09', 3]]);
 });
+
+test('newApps: daca cel mai bun top e nou (fara istoric), urcarea vine din topul cu istoric', async () => {
+  const { appsPath } = await import('../src/data/files.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trl-'));
+  for (let i = 0; i < 9; i++) {
+    const date = addDays('2026-01-01', i);
+    const charts = [{ type: 'toppaidapplications', genreId: 6014, apps: [{ rank: i === 8 ? 4 : 16, id: 2, name: 'Joc', genreId: 6014 }] }];
+    if (i === 8) charts.push({ type: 'toppaidapplications', genreId: 7001, apps: [{ rank: 1, id: 2, name: 'Joc', genreId: 6014 }] });
+    writeJsonGz(dayPath(dir, date, 'US'), { date, country: 'US', complete: true, requests: 1, errors: 0, suggest: [], charts });
+  }
+  writeJsonGz(appsPath(dir, '2026-01-09', 'US'), { 2: { name: 'Joc', genreId: 6014, releaseDate: '2025-12-30' } });
+  const db = openDb();
+  importAll(db, dir);
+  const [r] = makeViews(db).newApps({ country: 'US', launched: 30 }).rows;
+  assert.equal(r.bestRank, 1);
+  assert.equal(r.bestChartName, 'Action');
+  assert.equal(r.climb, 12);
+  assert.equal(r.newInChart, false);
+  assert.equal(r.climbChartName, 'Games #4');
+});
