@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { COUNTRIES } from '../apple/clients.js';
-import { listDates, dayPath, classifyPath, appsPath, statsPath, readJsonGzSafe } from '../data/files.js';
+import { listDates, dayPath, classifyPath, appsPath, statsPath, changesPath, readJsonGzSafe } from '../data/files.js';
 import { STATS_FIELDS } from '../collect/app-meta.js';
 import { bestObservations, scoreDayAdjusted } from '../metrics/score.js';
 
@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS app_stats (country TEXT, id INTEGER, date TEXT, ratin
 CREATE TABLE IF NOT EXISTS new_feed (country TEXT, date TEXT, type TEXT, rank INTEGER, app_id INTEGER, name TEXT,
   app_genre INTEGER);
 CREATE INDEX IF NOT EXISTS new_feed_cd ON new_feed (country, date);
+CREATE TABLE IF NOT EXISTS app_changes (country TEXT, date TEXT, id INTEGER, field TEXT, from_v TEXT, to_v TEXT, notes TEXT);
+CREATE INDEX IF NOT EXISTS app_changes_cd ON app_changes (country, date);
+CREATE INDEX IF NOT EXISTS app_stats_cd ON app_stats (country, date);
 `;
 // 2 = tabela `queried` (inceputurile de extindere intrebate in fiecare zi).
 // 3 = literele locale singure punctate ca 2 litere (scorurile se recalculeaza).
@@ -109,17 +112,24 @@ function importStats(db, cc, file, date) {
   }
 }
 
-const PATHS = { days: dayPath, classify: classifyPath, apps: appsPath, stats: statsPath };
+function importChanges(db, cc, file, date) {
+  db.prepare('DELETE FROM app_changes WHERE country=? AND date=?').run(cc, date);
+  const ins = db.prepare('INSERT INTO app_changes VALUES (?,?,?,?,?,?,?)');
+  for (const c of file) ins.run(cc, date, Number(c.id), c.field, c.from ?? null, c.to ?? null, c.notes ?? null);
+}
+
+const PATHS = { days: dayPath, classify: classifyPath, apps: appsPath, stats: statsPath, changes: changesPath };
 const IMPORTERS = {
   days: (db, cc, v) => importDay(db, v),
   classify: importClassify,
   apps: importApps,
   stats: importStats,
+  changes: importChanges,
 };
 
 // Importa doar fisierele noi sau schimbate (dupa marime). Fisierele stricate ajung in `problems`.
 export function importAll(db, dataDir) {
-  const stats = { days: 0, classify: 0, apps: 0, stats: 0, problems: 0 };
+  const stats = { days: 0, classify: 0, apps: 0, stats: 0, changes: 0, problems: 0 };
   const done = db.prepare('SELECT size FROM imported WHERE kind=? AND date=? AND country=?');
   const mark = db.prepare('INSERT OR REPLACE INTO imported VALUES (?,?,?,?)');
   const problem = db.prepare('INSERT OR REPLACE INTO problems VALUES (?,?)');

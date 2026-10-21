@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { openDb, importAll } from '../src/local/db.js';
 import { makeViews } from '../src/local/views.js';
-import { writeJsonGz, dayPath, classifyPath } from '../src/data/files.js';
+import { writeJsonGz, dayPath, classifyPath, appsPath, statsPath, changesPath } from '../src/data/files.js';
 import { addDays } from '../src/util/dates.js';
 
 function fixture() {
@@ -32,8 +32,8 @@ function fixture() {
 test('import incremental + vederi', () => {
   const dir = fixture();
   const db = openDb();
-  assert.deepEqual(importAll(db, dir), { days: 12, classify: 1, apps: 0, stats: 0, problems: 0 });
-  assert.deepEqual(importAll(db, dir), { days: 0, classify: 0, apps: 0, stats: 0, problems: 0 }, 'a doua oara nu reimporta');
+  assert.deepEqual(importAll(db, dir), { days: 12, classify: 1, apps: 0, stats: 0, changes: 0, problems: 0 });
+  assert.deepEqual(importAll(db, dir), { days: 0, classify: 0, apps: 0, stats: 0, changes: 0, problems: 0 }, 'a doua oara nu reimporta');
 
   const v = makeViews(db);
   const nou = v.view({ name: 'new', country: 'US', period: 7 });
@@ -248,4 +248,85 @@ test('scorul ajustat: combinatie rara penalizata, dar nu daca in top e un app ma
   assert.equal(t.last.score, 44);
   assert.equal(t.last.rare, true);
   assert.equal(t.history.at(-1).score, 44);
+});
+
+// Cifrele zilnice: [ratings, ratingsCur, stars, version, updated, price]
+const stat = (ratings, version = '1.0', price = 0) => [ratings, 0, 4.5, version, '2026-01-01', price];
+
+test('nicheView: sansa ta, banii din nisa (din rating-urile zilnice), se umple, Apple respinge', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trl-'));
+  for (let i = 0; i < 10; i++) {
+    const date = addDays('2026-01-01', i);
+    writeJsonGz(dayPath(dir, date, 'US'), { date, country: 'US', complete: true, requests: 1, errors: 0,
+      suggest: [{ prefix: 'a', kind: 'base', terms: ['amazon'] }, { prefix: 'ca', kind: 'base', terms: i >= 8 ? ['cat cafe', 'cat wallpaper'] : [] }], charts: [] });
+  }
+  const niche = { n: 10, med: 50, stars: 3.9, fresh: 6, title: 1, weak: 8, fresh90: 4, stale: 2 };
+  writeJsonGz(classifyPath(dir, '2026-01-09', 'US'), {
+    'cat cafe': { category: 6014, topAppIds: [7, 8], classifiedAt: '2026-01-09', niche },
+    'cat wallpaper': { category: 6014, topAppIds: [7], classifiedAt: '2026-01-09', niche },
+  });
+  writeJsonGz(statsPath(dir, '2026-01-08', 'US'), { 7: stat(100), 8: stat(10) });
+  writeJsonGz(statsPath(dir, '2026-01-10', 'US'), { 7: stat(120), 8: stat(30) });
+  const db = openDb();
+  importAll(db, dir);
+  const rows = makeViews(db).nicheView({ country: 'US', period: 14 }).rows;
+  const cafe = rows.find((x) => x.term === 'cat cafe');
+  assert.equal(cafe.chance, 67); // 0.4*0.8 + 0.2*0.4 + 0.15*0.2 + 0.1*1 + 0.15*0.9
+  assert.equal(cafe.chanceApprox, false);
+  assert.equal(cafe.flooding, true);
+  assert.equal(cafe.marketApps, 2);
+  assert.equal(cafe.market.downloadsDay, 1400); // (10 + 10 rating-uri/zi) x 70
+  const wall = rows.find((x) => x.term === 'cat wallpaper');
+  assert.equal(wall.sat.label, 'wallpaper');
+  assert.ok(wall.opportunity <= Math.ceil(cafe.opportunity / 2) + 1, "categoria respinsa de Apple: jumatate");
+});
+
+test('breakoutView: app-urile care primesc brusc mult mai multe rating-uri decat de obicei', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trl-'));
+  const date = '2026-03-01';
+  writeJsonGz(dayPath(dir, date, 'US'), { date, country: 'US', complete: true, requests: 1, errors: 0, suggest: [],
+    charts: [{ type: 'topfreeapplications', genreId: 6014, apps: [{ rank: 4, id: 1, name: 'Boom', genreId: 6014 }] }] });
+  writeJsonGz(appsPath(dir, '2026-02-01', 'US'), {
+    3: { name: 'Blip', genreId: 6014, releaseDate: '2025-03-01' },
+    1: { name: 'Boom', genreId: 6014, releaseDate: '2025-03-01' }, // ~1 rating/zi de la lansare, acum 50/zi
+    2: { name: 'Steady', genreId: 6014, releaseDate: '2025-03-01' }, // 100/zi mereu
+  });
+  writeJsonGz(statsPath(dir, '2026-02-26', 'US'), { 1: stat(365), 2: stat(36500), 3: stat(365) });
+  writeJsonGz(statsPath(dir, '2026-02-27', 'US'), { 1: stat(415), 2: stat(36600), 3: stat(365) });
+  writeJsonGz(statsPath(dir, '2026-03-01', 'US'), { 1: stat(515), 2: stat(36800), 3: stat(665) }); // 3: salt de o zi
+  const db = openDb();
+  importAll(db, dir);
+  const r = makeViews(db).breakoutView({ country: 'US' });
+  assert.equal(r.measured, 3);
+  assert.deepEqual(r.rows.map((x) => x.name), ['Boom']);
+  assert.equal(r.rows[0].recent, 50);
+  assert.equal(r.rows[0].baselineKind, 'lifetime');
+  assert.equal(r.rows[0].bestRank, 4);
+  assert.equal(r.rows[0].estimate.downloadsDay, 3500);
+});
+
+test('changesView: nume nou, versiune cu noutati, pret; implicit doar cei care fac bani', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trl-'));
+  for (const date of ['2026-03-01', '2026-03-02']) {
+    writeJsonGz(dayPath(dir, date, 'US'), { date, country: 'US', complete: true, requests: 1, errors: 0, suggest: [],
+      charts: [{ type: 'topgrossingapplications', genreId: 6014, apps: [{ rank: 2, id: 1, name: 'Money', genreId: 6014 }] }] });
+  }
+  writeJsonGz(appsPath(dir, '2026-03-01', 'US'), { 1: { name: 'Money', genreId: 6014 }, 2: { name: 'Free', genreId: 6014 } });
+  writeJsonGz(statsPath(dir, '2026-03-01', 'US'), { 1: stat(10, '1.0', 0), 2: stat(10, '1.0', 0) });
+  writeJsonGz(statsPath(dir, '2026-03-02', 'US'), { 1: stat(10, '1.1', 2.99), 2: stat(10, '2.0', 0) });
+  writeJsonGz(changesPath(dir, '2026-03-02', 'US'), [
+    { id: 1, field: 'name', from: 'Money', to: 'Money: AI Photo' },
+    { id: 1, field: 'version', from: '1.0', to: '1.1', notes: 'Paywall nou' },
+    { id: 2, field: 'version', from: '1.0', to: '2.0' },
+  ]);
+  const db = openDb();
+  importAll(db, dir);
+  const v = makeViews(db);
+  const money = v.changesView({ country: 'US' }).rows;
+  assert.deepEqual(money.map((r) => r.field).sort(), ['name', 'price', 'version']);
+  assert.equal(money.find((r) => r.field === 'price').to, 2.99);
+  assert.equal(money.find((r) => r.field === 'version').notes, 'Paywall nou');
+  assert.equal(v.changesView({ country: 'US', who: 'all' }).rows.length, 4);
+  const extra = v.appExtra(1);
+  assert.equal(extra.changes.length, 2);
 });

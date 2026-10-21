@@ -20,6 +20,7 @@ const csvCell = (v) => (v == null ? '' : /[",\n]/.test(String(v)) ? `"${String(v
 export const toCsv = (rows) => [CSV_COLS.join(','), ...rows.map((r) => CSV_COLS.map((c) => csvCell(r[c])).join(','))].join('\n');
 
 const LOOKUP_CHUNK = 100;
+const NICHE_REVIEW_APPS = 5;
 
 function readCloudStatus(dataDir) {
   try {
@@ -78,7 +79,7 @@ export function createServer({ db, dataDir, refresh = async () => ({}), apple = 
       }));
       // "Ti-ar mai placea": aceeasi nisa (icon, nume, rating-uri) dintr-un singur lookup.
       const similar = detail?.similarIds?.length ? await lookupApps(detail.similarIds, cc).catch(() => []) : [];
-      return { country: cc, detail, keywords, ranks: views.appRanks(id), similar };
+      return { country: cc, detail, keywords, ranks: views.appRanks(id), similar, ...views.appExtra(id) };
     },
     // Recenziile recente (2 pagini = pana la 100) + rezumatul plangerilor.
     '/api/reviews': async (q) => {
@@ -93,6 +94,25 @@ export function createServer({ db, dataDir, refresh = async () => ({}), apple = 
       }
       return appCache.get(key);
     },
+    // De ce se plang utilizatorii intr-o nisa: recenziile recente ale primelor 5 app-uri, adunate.
+    '/api/niche-reviews': async (q) => {
+      const term = (q.get('term') ?? '').trim().toLowerCase();
+      const cc = COUNTRIES.includes(q.get('country')) ? q.get('country') : 'US';
+      if (!term) throw new Error('term lipsa');
+      const key = `nreviews:${cc}:${term}`;
+      if (!appCache.has(key)) {
+        let ids = views.termApps(term, cc);
+        if (!ids) ids = (await apple.topApps(term, cc)).map((a) => a.id);
+        const apps = await lookupApps(ids.slice(0, NICHE_REVIEW_APPS), cc);
+        const all = [];
+        for (const a of apps) all.push(...(await apple.reviews(a.id, cc, 1).catch(() => [])).map((r) => ({ ...r, app: a.name })));
+        const names = new Set(apps.flatMap((a) => a.name.toLowerCase().split(/[^\p{L}\p{N}']+/u)).filter(Boolean));
+        appCache.set(key, { ...summarizeReviews(all, 12, names), apps: apps.map((a) => ({ id: a.id, name: a.name, icon: a.icon })) });
+      }
+      return appCache.get(key);
+    },
+    '/api/breakouts': (q) => views.breakoutView({ country: q.get('country'), category: q.get('category') }),
+    '/api/changes': (q) => views.changesView({ country: q.get('country'), category: q.get('category'), period: q.get('period'), who: q.get('who') ?? 'money' }),
     '/api/new-apps': (q) => views.newApps({ country: q.get('country'), category: q.get('category'), type: q.get('type') ?? 'all', launched: q.get('period'), source: q.get('source') ?? 'charts' }),
     '/api/niches': (q) => views.nicheView({ country: q.get('country'), category: q.get('category'), period: q.get('period') }),
     '/api/genre': (q) => ({ name: genreName(Number(q.get('id'))) }),

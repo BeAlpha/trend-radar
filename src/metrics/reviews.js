@@ -31,7 +31,8 @@ function mergePlurals(counts) {
   return counts;
 }
 
-export function summarizeReviews(reviews, topN = 12) {
+// exclude: cuvinte de ignorat in plangeri (ex. numele aplicatiilor din nisa: "google" la "google meet").
+export function summarizeReviews(reviews, topN = 12, exclude = new Set()) {
   const dist = [0, 0, 0, 0, 0];
   for (const r of reviews) if (r.stars >= 1 && r.stars <= 5) dist[r.stars - 1]++;
   const bad = reviews.filter((r) => r.stars <= 2);
@@ -39,7 +40,7 @@ export function summarizeReviews(reviews, topN = 12) {
   for (const r of bad) {
     // Un cuvant se numara o data pe recenzie: "cate recenzii il pomenesc".
     const ws = new Set(words(`${r.title} ${r.text}`).map((w) => (w === 'ads' ? 'ad' : w)));
-    for (const w of ws) counts.set(w, (counts.get(w) ?? 0) + 1);
+    for (const w of ws) if (!exclude.has(w)) counts.set(w, (counts.get(w) ?? 0) + 1);
   }
   mergePlurals(counts);
   const complaints = [...counts].filter(([, n]) => n >= 2)

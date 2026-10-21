@@ -164,3 +164,10 @@ table.compact td { padding: 6px 4px; }
 .review b { color: #f5c542; font-weight: 600; letter-spacing: 1px; }
 .reviews-grid h4 { margin: 14px 0 8px; font-size: 13px; }
 .review b .off { color: var(--line); }
+
+.badge.warn { background: #3a2c12; color: #f3c46d; }
+td.term .meta { margin-top: 3px; }
+.notes { max-width: 520px; white-space: normal; }
+.trends-links a { margin-right: 8px; }
+.est-row { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 6px; }
+.est-row div b { font-size: 15px; }

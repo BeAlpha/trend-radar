@@ -59,14 +59,17 @@ export function competition(n) {
   return clamp(100 * (0.6 * size + 0.25 * titled + 0.15 * closed));
 }
 
-// Oportunitate 0-100: cerere (scorul cuvantului + cresterea) contra concurentei.
+// Oportunitate 0-100: cerere (scorul cuvantului + cresterea) contra cat de usor intri.
 // delta = cresterea pe 7 zile (sau null); un cuvant nou conteaza ca in crestere.
-export function opportunity({ score, delta = null, isNew = false, comp, brand = false }) {
+// `chance` (sansa unui app nou) inlocuieste concurenta cand e masurata; categoriile respinse de Apple
+// (4.3) scad: 'hard' la jumatate, 'ban' la 0.
+export function opportunity({ score, delta = null, isNew = false, comp, brand = false, chance: ch = null, sat = null }) {
   if (comp == null) return null;
-  if (brand) return 0;
+  if (brand || sat?.level === 'ban') return 0;
   const growth = isNew ? 15 : Math.max(0, Math.min(20, delta ?? 0));
   const demand = Math.min(100, (score ?? 0) + growth);
-  return clamp(0.5 * demand + 0.5 * (100 - comp));
+  const open = ch && !ch.approx ? ch.value : 100 - comp;
+  return clamp((0.5 * demand + 0.5 * open) * (sat?.level === 'hard' ? 0.5 : 1));
 }
 
 // Sansa unei aplicatii NOI (0 rating-uri) sa intre in primele 10, 0-100.

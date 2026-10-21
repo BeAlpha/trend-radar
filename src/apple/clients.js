@@ -157,6 +157,9 @@ export function makeAppleClient({
       return parse(res);
     })));
 
+  // Akamai tine raspunsurile search/lookup pana la 24h: fara asta, cifrele "de azi" pot fi de ieri
+  // (iar rating-urile pe zi ar sari aiurea). Un parametru nou la fiecare cerere = raspuns proaspat.
+  const fresh = () => `&_=${Date.now().toString(36)}`;
   return {
     counter,
     suggest(prefix, country) {
@@ -167,7 +170,7 @@ export function makeAppleClient({
     },
     topApps(term, country) {
       const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}`
-        + `&country=${country.toLowerCase()}&media=software&entity=software&limit=10&lang=en_us`;
+        + `&country=${country.toLowerCase()}&media=software&entity=software&limit=10&lang=en_us${fresh()}`;
       return call(heavy, 'search', url, {}, async (r) => parseSearch(await r.json()));
     },
     chart(country, type, genreId) {
@@ -179,7 +182,7 @@ export function makeAppleClient({
       return call(light, 'rss', url, {}, async (r) => parseChart(await r.json()));
     },
     async appDetail(id, country) {
-      const url = `https://itunes.apple.com/lookup?id=${id}&country=${country.toLowerCase()}`;
+      const url = `https://itunes.apple.com/lookup?id=${id}&country=${country.toLowerCase()}${fresh()}`;
       const detail = await call(heavy, 'lookup', url, {}, async (r) => parseAppDetail((await r.json()).results?.[0]));
       if (!detail) return null;
       try {
@@ -196,7 +199,7 @@ export function makeAppleClient({
       return detail;
     },
     appMeta(ids, country) {
-      const url = `https://itunes.apple.com/lookup?id=${ids.join(',')}&country=${country.toLowerCase()}`;
+      const url = `https://itunes.apple.com/lookup?id=${ids.join(',')}&country=${country.toLowerCase()}${fresh()}`;
       return call(heavy, 'lookup', url, {}, async (r) => parseAppMeta(await r.json()));
     },
     reviews(id, country, page = 1) {

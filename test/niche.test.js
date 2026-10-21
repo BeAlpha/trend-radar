@@ -48,3 +48,22 @@ test('nicheStats: marca = doar primul are numele si e urias fata de rest', () =>
   const niche = nicheStats([{ name: 'Cat cafe', ratings: 50 }, { name: 'Cat cafe 2', ratings: 40 }], 'cat cafe', '2026-10-12');
   assert.equal(niche.brand, false);
 });
+
+test('chance / saturated / marketEstimate / opportunity cu categoriile respinse de Apple', async () => {
+  const { chance, saturated, marketEstimate, opportunity, isFlooding } = await import('../src/metrics/niche.js');
+  assert.deepEqual(chance({ n: 10, med: 200000, stars: 4.7, fresh: 0, title: 10, weak: 0, fresh90: 0, stale: 0 }), { value: 0, approx: false });
+  assert.equal(chance({ n: 10, med: 5, stars: 3.9, fresh: 6, title: 1, weak: 10, fresh90: 5, stale: 5 }).value, 81);
+  assert.equal(chance({ n: 10, med: 5, stars: 3.9, fresh: 6, title: 1 }).approx, true); // clasificare veche
+  assert.equal(chance({ n: 0 }), null);
+  assert.equal(isFlooding({ fresh90: 3 }), true);
+  assert.equal(saturated('flashlight app').label, 'lanternă');
+  assert.equal(saturated('fondos de pantalla').label, 'wallpaper');
+  assert.equal(saturated('fart sounds').level, 'ban');
+  assert.equal(saturated('pet games'), null);
+  assert.equal(saturated('kitchen timer for cooking'), null);
+  assert.equal(saturated('ai photo'), null);
+  assert.deepEqual(marketEstimate(10), { downloadsDay: 700, month: 7140, low: 3570, high: 14280 });
+  assert.equal(opportunity({ score: 50, comp: 40, sat: { level: 'ban' } }), 0);
+  assert.equal(opportunity({ score: 50, delta: 10, comp: 40, sat: { level: 'hard' } }), 30);
+  assert.equal(opportunity({ score: 50, delta: 10, comp: 40, chance: { value: 80, approx: false } }), 70);
+});

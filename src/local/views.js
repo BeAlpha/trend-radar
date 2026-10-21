@@ -4,11 +4,16 @@ import { genreName, GENRES } from '../apple/genres.js';
 import { newTerms, rising, falling, topTerms, disappeared, warmup } from '../metrics/trends.js';
 import { chartMovers, themes } from '../metrics/themes.js';
 import { addDays, diffDays } from '../util/dates.js';
-import { competition, opportunity } from '../metrics/niche.js';
+import { competition, opportunity, chance, isFlooding, saturated, marketEstimate } from '../metrics/niche.js';
 import { BIG_RATINGS } from '../metrics/score.js';
 
 export const SERIES_DAYS = 45;
 export const MAX_ROWS = 1500;
+// Explozie: in ultimele zile primeste de 3+ ori mai multe rating-uri pe zi decat de obicei (si minim 5/zi).
+export const BREAKOUT_RATIO = 3;
+export const BREAKOUT_MIN = 5;
+export const RECENT_DAYS = 3;
+export const LIFETIME_MAX_DAYS = 365;
 
 // Cuvintele cu trafic real dovedit: un app mare care are cuvantul in nume, in primele 10 din cautare.
 // Ele pastreaza scorul intreg chiar daca apar doar dupa o combinatie rara de litere ("vpn", "nfl").
@@ -58,6 +63,48 @@ export function makeViews(db) {
     return cache.get(key);
   };
   const bigOf = (cc) => ctx(cc).big;
+
+  // Ritmul rating-urilor pe app, dintr-o singura citire (ultimele 14 zile de cifre):
+  //   perDay = media pe ultimele pana la 7 zile; recent = pe ultimele pana la 3 zile;
+  //   prior  = pe zilele dinainte de cele recente (doar daca acopera minim 4 zile).
+  const velCache = new Map();
+  function velocity(cc) {
+    const key = `${cc}:${version}`;
+    if (velCache.has(key)) return velCache.get(key);
+    const latest = db.prepare('SELECT MAX(date) d FROM app_stats WHERE country=?').get(cc).d;
+    const map = new Map();
+    if (latest) {
+      const byId = new Map();
+      for (const r of db.prepare('SELECT id, date, ratings, stars, price FROM app_stats WHERE country=? AND date>=? ORDER BY date')
+        .all(cc, addDays(latest, -14))) {
+        if (!byId.has(r.id)) byId.set(r.id, []);
+        byId.get(r.id).push(r);
+      }
+      const rate = (a, b) => { const d = diffDays(b.date, a.date); return d > 0 ? Math.max(0, (b.ratings - a.ratings) / d) : null; };
+      const round = (v) => (v == null ? null : Math.round(v * 10) / 10);
+      for (const [id, pts] of byId) {
+        const now = pts.at(-1);
+        if (now.date !== latest) continue; // app iesit din urmarire
+        const w7 = pts.find((p) => p.date >= addDays(latest, -7));
+        const start = pts.find((p) => p.date >= addDays(latest, -RECENT_DAYS));
+        const first = pts[0];
+        // Cel mai slab ritm zilnic din zilele recente: o explozie reala tine cel putin 2 zile la rand
+        // (un salt de o singura zi poate fi doar o cifra intarziata de la Apple).
+        const steps = [];
+        for (let i = pts.indexOf(start) + 1; i < pts.length; i++) steps.push(rate(pts[i - 1], pts[i]));
+        map.set(id, {
+          sustained: steps.length >= 2 ? round(Math.min(...steps)) : null,
+          ratings: now.ratings, stars: now.stars, price: now.price,
+          perDay: round(rate(w7, now)), recent: round(rate(start, now)),
+          prior: diffDays(start.date, first.date) >= 4 ? round(rate(first, start)) : null,
+          ratingsThen: start.ratings, recentFrom: start.date,
+        });
+      }
+    }
+    const out = { latest, map };
+    velCache.set(key, out);
+    return out;
+  }
 
   const enrich = (cc, index, r, withApps = false) => {
     const i = index.get(r.term) ?? {};
@@ -150,6 +197,12 @@ export function makeViews(db) {
     return out.sort((a, b) => b.themes.length - a.themes.length || b.movers.length - a.movers.length);
   }
 
+  function nicheMarket(cc, ids) {
+    const vel = velocity(cc).map;
+    const rpd = ids.map((id) => vel.get(id)?.perDay).filter((v) => v != null);
+    return rpd.length ? { ...marketEstimate(rpd.reduce((n, v) => n + v, 0)), apps: rpd.length } : null;
+  }
+
   function termView(term) {
     const t = term.trim().toLowerCase();
     const perCountry = COUNTRIES.map((cc) => {
@@ -172,9 +225,11 @@ export function makeViews(db) {
         topAppIds: cls ? JSON.parse(cls.top_app_ids) : [],
         niche: cls?.niche ? JSON.parse(cls.niche) : null,
         competition: cls?.niche ? competition(JSON.parse(cls.niche)) : null,
+        chance: cls?.niche ? chance(JSON.parse(cls.niche)) : null,
+        market: cls ? nicheMarket(cc, JSON.parse(cls.top_app_ids)) : null,
       };
     });
-    return { term: t, countries: perCountry };
+    return { term: t, countries: perCountry, saturated: saturated(t) };
   }
 
   // Cuvintele pe care app-ul apare in primele 10 (din clasificarile noastre), pe tari.
@@ -376,18 +431,25 @@ export function makeViews(db) {
       for (const r of newTerms(series, index, p)) cand.set(r.term, { ...r, isNew: true, delta: null });
       for (const r of rising(series, 7)) if (!cand.has(r.term)) cand.set(r.term, { ...r, isNew: false });
       const recent = series.dates.length ? addDays(series.dates.at(-1), -180) : null;
+      const vel = velocity(cc).map;
       for (const r of cand.values()) {
         const i = index.get(r.term) ?? {};
         const nRow = nicheOf.get(cc, r.term)?.niche;
         const niche = nRow ? JSON.parse(nRow) : null;
         const comp = competition(niche);
         const top = i.topAppIds ?? [];
+        const ch = chance(niche);
+        const sat = saturated(r.term);
+        const rpd = top.map((id) => vel.get(id)?.perDay).filter((v) => v != null);
         const moneyApps = top.filter((id) => grossing.has(id));
         const newApps = top.filter((id) => { const d = fresh.get(cc, id)?.release_date; return d && recent && d >= recent; });
         rows.push(enrich(cc, index, {
           term: r.term, score: r.score, delta: r.delta ?? null, isNew: r.isNew, firstSeen: r.firstSeen ?? null,
           preliminary: r.preliminary ?? false,
-          competition: comp, brand: !!niche?.brand, opportunity: opportunity({ score: r.score, delta: r.delta, isNew: r.isNew, comp, brand: niche?.brand }),
+          competition: comp, brand: !!niche?.brand,
+          opportunity: opportunity({ score: r.score, delta: r.delta, isNew: r.isNew, comp, brand: niche?.brand, chance: ch, sat }),
+          chance: ch?.value ?? null, chanceApprox: !!ch?.approx, flooding: isFlooding(niche), sat,
+          market: rpd.length ? marketEstimate(rpd.reduce((n, v) => n + v, 0)) : null, marketApps: rpd.length,
           niche, moneyApps: moneyApps.length, freshApps: niche ? niche.fresh : newApps.length,
           apps: top.slice(0, 3), moneyIds: moneyApps.slice(0, 3),
         }));
@@ -396,6 +458,120 @@ export function makeViews(db) {
     const out = rows.filter(matchCategory(category)).filter((r) => brands || !r.brand)
       .sort((a, b) => (b.opportunity ?? -1) - (a.opportunity ?? -1) || b.score - a.score);
     return { total: out.length, rows: out.slice(0, limit), measured: out.filter((r) => r.competition != null).length };
+  }
+
+  const metaOf = (cc) => new Map(db.prepare('SELECT id, name, genre_id, release_date, seller FROM app_meta WHERE country=?').all(cc).map((m) => [m.id, m]));
+  // Cel mai bun loc de azi in topurile de descarcari si in topul incasarilor, pe app.
+  function todayRanks(cc) {
+    const latest = db.prepare('SELECT MAX(date) d FROM charts WHERE country=?').get(cc).d;
+    const dl = new Map(), gross = new Map();
+    for (const r of db.prepare('SELECT app_id id, type, genre_id, rank FROM charts WHERE country=? AND date=?').all(cc, latest)) {
+      const m = r.type === 'topgrossingapplications' ? gross : dl;
+      if (!m.has(r.id) || r.rank < m.get(r.id).rank) m.set(r.id, r);
+    }
+    return { dl, gross };
+  }
+  const byCategory = (category) => (a) => category === 'all' || category == null || category === '' || a.genreId === Number(category);
+
+  // Explozii: app-urile (din topuri, lansari noi si nisele calde) care in ultimele zile primesc mult mai multe
+  // rating-uri pe zi decat de obicei. "De obicei" = zilele dinainte (cand avem minim 4) sau media de la lansare.
+  // Raportul se ia din cea mai slaba zi recenta (minim 2 zile la rand), ca un salt de o zi sa nu para explozie.
+  function breakoutView({ country = 'US', category = 'all', limit = MAX_ROWS }) {
+    const ccs = country === 'ALL' ? COUNTRIES : [country];
+    const byId = new Map();
+    let measured = 0;
+    for (const cc of ccs) {
+      const { latest, map } = velocity(cc);
+      if (!latest) continue;
+      const meta = metaOf(cc);
+      const { dl, gross } = todayRanks(cc);
+      for (const [id, v] of map) {
+        if (v.sustained == null) continue;
+        measured++;
+        if (v.recent < BREAKOUT_MIN || v.sustained < BREAKOUT_MIN) continue;
+        const m = meta.get(id);
+        const age = m?.release_date ? diffDays(v.recentFrom, m.release_date) : null;
+        // Media de la lansare e un reper bun doar pentru app-urile din ultimul an (cele vechi primeau mult mai
+        // putine rating-uri inainte ca Apple sa ceara rating in aplicatie); pentru ele asteptam zilele dinainte.
+        const baseline = v.prior ?? (age != null && age > 0 && age <= LIFETIME_MAX_DAYS ? v.ratingsThen / Math.max(30, age) : null);
+        if (baseline == null) continue;
+        const ratio = v.sustained / Math.max(baseline, 0.5);
+        if (ratio < BREAKOUT_RATIO) continue;
+        const d = dl.get(id), g = gross.get(id);
+        const entry = {
+          country: cc, recent: v.recent, baseline: Math.round(baseline * 10) / 10, baselineKind: v.prior != null ? 'prior' : 'lifetime',
+          ratio: Math.round(ratio * 10) / 10, ratings: v.ratings, stars: v.stars,
+          bestRank: d?.rank ?? null, bestChartName: d ? genreName(d.genre_id) : null, type: d?.type ?? null,
+          grossRank: g?.rank ?? null, grossChartName: g ? genreName(g.genre_id) : null,
+        };
+        const cur = byId.get(id);
+        if (!cur) byId.set(id, { id, name: m?.name ?? String(id), seller: m?.seller ?? '', genreId: m?.genre_id ?? null, releaseDate: m?.release_date ?? null, all: [entry] });
+        else cur.all.push(entry);
+      }
+    }
+    const out = [...byId.values()].map((a) => {
+      const best = [...a.all].sort((x, y) => y.ratio - x.ratio)[0];
+      const recent = Math.round(a.all.reduce((n, e) => n + e.recent, 0) * 10) / 10;
+      return {
+        id: a.id, name: a.name, seller: a.seller, genreId: a.genreId, categoryName: genreName(a.genreId), releaseDate: a.releaseDate,
+        ...best, recent, countries: a.all.map((e) => e.country), countryCount: a.all.length,
+        estimate: marketEstimate(recent),
+      };
+    }).filter(byCategory(category))
+      .sort((x, y) => y.ratio * Math.log10(y.recent + 1) - x.ratio * Math.log10(x.recent + 1));
+    return { total: out.length, rows: out.slice(0, limit), measured };
+  }
+
+  // Ce schimba aplicatiile: nume (test de cuvinte cheie), versiuni noi (cu noutatile la cei care fac bani), pret.
+  // who='money' = doar cele din topul incasarilor de azi.
+  function changesView({ country = 'US', category = 'all', period = 7, who = 'money', limit = MAX_ROWS }) {
+    const ccs = country === 'ALL' ? COUNTRIES : [country];
+    const p = Number(period) || 7;
+    const out = [];
+    for (const cc of ccs) {
+      const dates = db.prepare('SELECT DISTINCT date FROM app_stats WHERE country=? ORDER BY date DESC LIMIT ?').all(cc, p + 1).map((r) => r.date).reverse();
+      if (dates.length < 2) continue;
+      const since = dates[1];
+      const meta = metaOf(cc);
+      const { dl, gross } = todayRanks(cc);
+      const push = (id, date, field, from, to, notes = null) => {
+        const m = meta.get(id);
+        const g = gross.get(id), d = dl.get(id);
+        out.push({
+          country: cc, date, id, field, from, to, notes,
+          name: field === 'name' ? to : m?.name ?? String(id), seller: m?.seller ?? '', genreId: m?.genre_id ?? null, categoryName: genreName(m?.genre_id),
+          grossRank: g?.rank ?? null, grossChartName: g ? genreName(g.genre_id) : null,
+          bestRank: d?.rank ?? null, bestChartName: d ? genreName(d.genre_id) : null,
+        });
+      };
+      for (const c of db.prepare('SELECT * FROM app_changes WHERE country=? AND date>=?').all(cc, since)) push(c.id, c.date, c.field, c.from_v, c.to_v, c.notes);
+      const price = db.prepare(`SELECT a.id, a.price now, b.price was FROM app_stats a JOIN app_stats b ON b.country=a.country AND b.id=a.id AND b.date=?
+        WHERE a.country=? AND a.date=? AND a.price IS NOT b.price`);
+      for (let i = 1; i < dates.length; i++) {
+        for (const r of price.all(dates[i - 1], cc, dates[i])) push(r.id, dates[i], 'price', r.was, r.now);
+      }
+    }
+    const rows = out.filter(byCategory(category)).filter((r) => who !== 'money' || r.grossRank != null)
+      .sort((a, b) => b.date.localeCompare(a.date) || (a.grossRank ?? 999) - (b.grossRank ?? 999));
+    return { total: rows.length, rows: rows.slice(0, limit) };
+  }
+
+  // Pentru pagina aplicatiei: estimarea descarcarilor/banilor pe tari si istoricul schimbarilor.
+  function appExtra(appId) {
+    const id = Number(appId);
+    const estimates = [];
+    for (const cc of COUNTRIES) {
+      const v = velocity(cc).map.get(id);
+      if (v?.perDay != null) estimates.push({ country: cc, perDay: v.perDay, ...marketEstimate(v.perDay) });
+    }
+    const changes = db.prepare('SELECT country, date, field, from_v "from", to_v "to", notes FROM app_changes WHERE id=? ORDER BY date DESC LIMIT 60').all(id);
+    return { estimates, changes };
+  }
+
+  // Primele app-uri dintr-o nisa (din clasificare), pentru recenziile nisei.
+  function termApps(term, cc) {
+    const r = db.prepare('SELECT top_app_ids FROM class WHERE country=? AND term=?').get(cc, term.trim().toLowerCase());
+    return r ? JSON.parse(r.top_app_ids) : null;
   }
 
   function suggestTerms(q) {
@@ -427,7 +603,8 @@ export function makeViews(db) {
   }
 
   return {
-    view, themeView, termView, suggestTerms, appKeywords, newApps, appRanks, nicheView, categories, status,
-    invalidate: () => { version++; cache.clear(); },
+    view, themeView, termView, suggestTerms, appKeywords, newApps, appRanks, nicheView, breakoutView, changesView, appExtra, termApps,
+    categories, status,
+    invalidate: () => { version++; cache.clear(); velCache.clear(); },
   };
 }
