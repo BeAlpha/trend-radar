@@ -1,35 +1,35 @@
 {
-  "lastRun": "2026-10-20",
-  "finishedAt": "2026-10-20T10:21:12.441Z",
+  "lastRun": "2026-10-21",
+  "finishedAt": "2026-10-21T12:05:34.748Z",
   "countries": {
     "US": {
       "complete": true,
-      "requests": 2143,
+      "requests": 3915,
       "errors": 0
     },
     "GB": {
       "complete": true,
-      "requests": 2268,
+      "requests": 3907,
       "errors": 0
     },
     "DE": {
       "complete": true,
-      "requests": 2303,
-      "errors": 0
+      "requests": 3909,
+      "errors": 1
     },
     "FR": {
       "complete": true,
-      "requests": 2247,
+      "requests": 3918,
       "errors": 0
     },
     "IT": {
       "complete": true,
-      "requests": 2346,
+      "requests": 3918,
       "errors": 0
     },
     "ES": {
       "complete": true,
-      "requests": 2241,
+      "requests": 3920,
       "errors": 0
     }
   }
