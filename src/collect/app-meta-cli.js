@@ -11,5 +11,5 @@ const apple = makeAppleClient({ retry: makeRetry({ log: console.log }) });
 for (const country of COUNTRIES) {
   const day = readJsonGz(dayPath(values.data, values.date, country));
   const n = await collectAppMeta({ country, date: values.date, dataDir: values.data, apple, charts: day.charts ?? [] });
-  console.log(`${country}: ${n.meta} app-uri noi, ${n.stats} cu cifre`);
+  console.log(`${country}: ${n.meta} app-uri noi, ${n.stats} cu cifre, ${n.changes} schimbari`);
 }

@@ -6,7 +6,7 @@ import path from 'node:path';
 import { runCountry, classificationQueue, expansionPrefixes } from '../src/collect/run-country.js';
 import { prefixesFor } from '../src/collect/prefixes.js';
 import { makeCounter } from '../src/apple/net.js';
-import { readJsonGz, dayPath, classifyPath, appsPath, statsPath, writeJsonGz } from '../src/data/files.js';
+import { readJsonGz, dayPath, classifyPath, appsPath, statsPath, changesPath, writeJsonGz, readCountryNames } from '../src/data/files.js';
 import { addDays } from '../src/util/dates.js';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'tr-'));
@@ -31,7 +31,7 @@ function fakeApple({ failSuggest = () => false } = {}) {
     appMeta: (ids) => counter.track(async () => {
       calls.appMeta = [...(calls.appMeta ?? []), ids];
       return ids.map((id) => ({ id, name: `App ${id}`, genreId: 6003, releaseDate: '2026-10-01', seller: 'S',
-        ratings: id * 10, ratingsCur: id, stars: 4.5, version: '1.0', updated: '2026-10-10', price: 0 }));
+        ratings: id * 10, ratingsCur: id, stars: 4.5, version: '1.0', updated: '2026-10-10', price: 0, notes: 'Fixes' }));
     }),
   };
 }
@@ -58,7 +58,7 @@ test('runCountry scrie fisierul zilei si clasificarile', async () => {
   assert.equal(Object.keys(cls).length, 3);
   assert.equal(cls['a one'].category, 6003);
   assert.equal(cls['a one'].difficulty, 1);
-  assert.deepEqual(cls['a one'].niche, { n: 5, med: 100, max: 100, tmax: 0, stars: 4, fresh: 0, title: 0, brand: false });
+  assert.deepEqual(cls['a one'].niche, { n: 5, med: 100, max: 100, tmax: 0, stars: 4, fresh: 0, title: 0, brand: false, weak: 5, fresh90: 0, stale: 0 });
   assert.equal(s.queueLeft, 1);
 });
 
@@ -124,6 +124,7 @@ test('runCountry: rularea de proba (smoke) nu e zi completa', async () => {
 test('runCountry: lookup pentru toate app-urile din topuri + lansari noi; data lansarii doar pentru cele necunoscute', async () => {
   const dir = tmp();
   writeJsonGz(appsPath(dir, '2026-10-01', 'US'), { 8: { name: 'Vechi', releaseDate: '2020-01-01' } });
+  writeJsonGz(statsPath(dir, '2026-10-11', 'US'), { 8: [70, 8, 4.5, '0.9', '2026-09-01', 0], 9: [90, 9, 4.5, '1.0', '2026-10-10', 0] });
   const apple = fakeApple();
   apple.chart = () => apple.counter.track(async () => [{ rank: 1, id: 9, name: 'Z', genreId: 6003 }, { rank: 2, id: 8, name: 'V', genreId: 6003 }]);
   apple.newFeed = (cc, type) => apple.counter.track(async () => (type === 'newfreeapplications' ? [{ rank: 1, id: 4, name: 'N', genreId: 6014 }] : []));
@@ -132,7 +133,12 @@ test('runCountry: lookup pentru toate app-urile din topuri + lansari noi; data l
     budget: { prefixes: ['a'], chartGenres: [6003], classifyMax: 0 },
   });
   assert.deepEqual(apple.calls.appMeta, [[9, 8, 4]]);
-  assert.deepEqual(s.appMeta, { meta: 2, stats: 3 });
+  assert.deepEqual(s.appMeta, { meta: 2, stats: 3, changes: 2 });
+  // Redenumirea (fata de data/apps) si versiunea noua (fata de ziua precedenta), cu noutatile: 8 e si in topul incasarilor.
+  assert.deepEqual(readJsonGz(changesPath(dir, '2026-10-12', 'US')), [
+    { id: 8, field: 'name', from: 'Vechi', to: 'App 8' },
+    { id: 8, field: 'version', from: '0.9', to: '1.0', notes: 'Fixes' },
+  ]);
   const meta = readJsonGz(appsPath(dir, '2026-10-12', 'US'));
   assert.deepEqual(Object.keys(meta).sort(), ['4', '9']);
   assert.equal(meta[9].releaseDate, '2026-10-01');
@@ -144,7 +150,7 @@ test('classificationQueue: cuvintele in crestere fara scor de nisa se refac, dup
   const index = new Map([
     ['vechi', { firstSeen: '2026-09-01', classifiedAt: '2026-10-10' }],
     ['urca', { firstSeen: '2026-09-01', classifiedAt: '2026-10-10' }],
-    ['urca2', { firstSeen: '2026-09-01', classifiedAt: '2026-10-10', niche: { n: 10 } }],
+    ['urca2', { firstSeen: '2026-09-01', classifiedAt: '2026-10-10', niche: { n: 10, weak: 2 } }],
     ['nou', { firstSeen: '2026-10-11' }],
   ]);
   const today = new Map([['vechi', 90], ['urca', 50], ['urca2', 60], ['nou', 10]]);
@@ -159,4 +165,26 @@ test('classificationQueue: cuvintele din combinatii rare fara app-ul maxim masur
   ]);
   const today = new Map([['jt rides', 69], ['vpn', 69], ['mt5', 66]]);
   assert.deepEqual(classificationQueue(index, today, '2026-10-12', new Set(), new Set(['jt rides', 'vpn', 'mt5'])), ['jt rides']);
+});
+
+test('readCountryNames: redenumirile din data/changes inlocuiesc numele vechi', () => {
+  const dir = tmp();
+  writeJsonGz(appsPath(dir, '2026-10-01', 'US'), { 8: { name: 'Vechi' }, 9: { name: 'Z' } });
+  writeJsonGz(changesPath(dir, '2026-10-05', 'US'), [{ id: 8, field: 'name', from: 'Vechi', to: 'Nou' }]);
+  writeJsonGz(changesPath(dir, '2026-10-12', 'US'), [{ id: 9, field: 'name', from: 'Z', to: 'Viitor' }]);
+  const names = readCountryNames(dir, 'US', { before: '2026-10-12' });
+  assert.equal(names.get(8), 'Nou');
+  assert.equal(names.get(9), 'Z');
+});
+
+test('nicheAppIds: app-urile din nisele calde, cele cu scor mare primele, cu limita', async () => {
+  const { nicheAppIds } = await import('../src/collect/run-country.js');
+  const dates = Array.from({ length: 10 }, (_, i) => addDays('2026-01-01', i));
+  const scores = new Map(dates.map((d, i) => [d, new Map(i === 9 ? [['mic', 20], ['mare', 60], ['vechi', 10]] : [['vechi', 10]])]));
+  const index = new Map([
+    ['mic', { firstSeen: '2026-01-10', topAppIds: [3, 4] }], ['mare', { firstSeen: '2026-01-10', topAppIds: [1, 2, 3] }],
+    ['vechi', { firstSeen: '2026-01-01', topAppIds: [9] }],
+  ]);
+  assert.deepEqual(nicheAppIds({ dates, scores }, index), [1, 2, 3, 4]);
+  assert.deepEqual(nicheAppIds({ dates, scores }, index, 2), [1, 2]);
 });

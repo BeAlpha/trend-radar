@@ -35,6 +35,7 @@ export function parseSearch(json) {
     ratings: r.userRatingCount ?? 0,
     stars: r.averageUserRating ?? null,
     releaseDate: r.releaseDate ? r.releaseDate.slice(0, 10) : null,
+    updated: r.currentVersionReleaseDate ? r.currentVersionReleaseDate.slice(0, 10) : null,
   }));
 }
 
@@ -64,6 +65,7 @@ export function parseAppMeta(json) {
     version: r.version ?? '',
     updated: r.currentVersionReleaseDate ? r.currentVersionReleaseDate.slice(0, 10) : null,
     price: r.price ?? 0,
+    notes: r.releaseNotes ?? '',
   }));
 }
 

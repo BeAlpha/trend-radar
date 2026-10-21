@@ -21,8 +21,8 @@ test('parseSearch: gen principal si subgen de joc', () => {
     { trackId: 2, trackName: 'Y', primaryGenreId: '6003', genreIds: ['6003'] },
   ] });
   assert.deepEqual(r, [
-    { id: 1, name: 'X', genreId: 6014, subgenreId: 7012, ratings: 5, stars: 4.5, releaseDate: '2026-09-01' },
-    { id: 2, name: 'Y', genreId: 6003, subgenreId: null, ratings: 0, stars: null, releaseDate: null },
+    { id: 1, name: 'X', genreId: 6014, subgenreId: 7012, ratings: 5, stars: 4.5, releaseDate: '2026-09-01', updated: null },
+    { id: 2, name: 'Y', genreId: 6003, subgenreId: null, ratings: 0, stars: null, releaseDate: null, updated: null },
   ]);
 });
 
@@ -79,9 +79,9 @@ test('parseSubtitle: primul subtitlu din pagina (antetul app-ului)', async () =>
 test('parseAppMeta: date stabile + cifrele zilei', () => {
   const [m] = parseAppMeta({ results: [{ trackId: 7, trackName: 'A', primaryGenreId: 6014, releaseDate: '2026-10-01T07:00:00Z',
     sellerName: 'S', userRatingCount: 120, userRatingCountForCurrentVersion: 30, averageUserRating: 4.6789,
-    version: '1.2', currentVersionReleaseDate: '2026-10-15T10:00:00Z', price: 2.99 }] });
+    version: '1.2', currentVersionReleaseDate: '2026-10-15T10:00:00Z', price: 2.99, releaseNotes: 'Bug fixes' }] });
   assert.deepEqual(m, { id: 7, name: 'A', genreId: 6014, releaseDate: '2026-10-01', seller: 'S',
-    ratings: 120, ratingsCur: 30, stars: 4.68, version: '1.2', updated: '2026-10-15', price: 2.99 });
+    ratings: 120, ratingsCur: 30, stars: 4.68, version: '1.2', updated: '2026-10-15', price: 2.99, notes: 'Bug fixes' });
 });
 
 test('parseIap / parseSimilar: din pagina web App Store', () => {

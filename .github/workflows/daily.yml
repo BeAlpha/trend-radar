@@ -63,6 +63,7 @@ jobs:
             data/classify/${{ needs.plan.outputs.date }}/${{ matrix.country }}.json.gz
             data/apps/${{ needs.plan.outputs.date }}/${{ matrix.country }}.json.gz
             data/stats/${{ needs.plan.outputs.date }}/${{ matrix.country }}.json.gz
+            data/changes/${{ needs.plan.outputs.date }}/${{ matrix.country }}.json.gz
           if-no-files-found: warn
           retention-days: 3
 

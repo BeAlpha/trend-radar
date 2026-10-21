@@ -3,6 +3,7 @@
 //   data/classify/<date>/<CC>.json.gz  cuvintele clasificate in acea zi
 //   data/apps/<date>/<CC>.json.gz      app-urile din topuri vazute prima data in acea zi (data lansarii etc.)
 //   data/stats/<date>/<CC>.json.gz     cifrele zilei pentru app-urile din topuri: rating-uri, versiune, pret
+//   data/changes/<date>/<CC>.json.gz   schimbarile zilei: nume nou, versiune noua (cu noutatile, la cei care fac bani)
 import fs from 'node:fs';
 import path from 'node:path';
 import { gzipSync, gunzipSync } from 'node:zlib';
@@ -12,6 +13,7 @@ export const dayPath = (dataDir, date, cc) => path.join(dataDir, 'days', date, `
 export const classifyPath = (dataDir, date, cc) => path.join(dataDir, 'classify', date, `${cc}.json.gz`);
 export const appsPath = (dataDir, date, cc) => path.join(dataDir, 'apps', date, `${cc}.json.gz`);
 export const statsPath = (dataDir, date, cc) => path.join(dataDir, 'stats', date, `${cc}.json.gz`);
+export const changesPath = (dataDir, date, cc) => path.join(dataDir, 'changes', date, `${cc}.json.gz`);
 
 export function writeJsonGz(file, obj) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -64,6 +66,26 @@ export function readCountryAppMeta(dataDir, cc, { before = null } = {}) {
     if (before && date >= before) continue;
     const r = readJsonGzSafe(appsPath(dataDir, date, cc));
     if (r.ok) for (const [id, m] of Object.entries(r.value)) out.set(Number(id), m);
+  }
+  return out;
+}
+
+// Cifrele din ultima zi dinaintea lui `before` (pentru a vedea ce s-a schimbat azi): { id: row } sau null.
+export function readLatestStats(dataDir, cc, { before }) {
+  for (const date of listDates(dataDir, 'stats').filter((d) => d < before).reverse()) {
+    const r = readJsonGzSafe(statsPath(dataDir, date, cc));
+    if (r.ok) return r.value;
+  }
+  return null;
+}
+
+// Numele actual al fiecarui app: cel din data/apps, actualizat cu redenumirile din data/changes.
+export function readCountryNames(dataDir, cc, { before, known = readCountryAppMeta(dataDir, cc, { before }) }) {
+  const out = new Map([...known].map(([id, m]) => [id, m.name]));
+  for (const date of listDates(dataDir, 'changes')) {
+    if (date >= before) continue;
+    const r = readJsonGzSafe(changesPath(dataDir, date, cc));
+    if (r.ok) for (const c of r.value) if (c.field === 'name') out.set(Number(c.id), c.to);
   }
   return out;
 }
