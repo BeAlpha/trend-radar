@@ -21,8 +21,8 @@ test('parseSearch: gen principal si subgen de joc', () => {
     { trackId: 2, trackName: 'Y', primaryGenreId: '6003', genreIds: ['6003'] },
   ] });
   assert.deepEqual(r, [
-    { id: 1, name: 'X', genreId: 6014, subgenreId: 7012, ratings: 5, stars: 4.5, releaseDate: '2026-09-01', updated: null },
-    { id: 2, name: 'Y', genreId: 6003, subgenreId: null, ratings: 0, stars: null, releaseDate: null, updated: null },
+    { id: 1, name: 'X', seller: '', genreId: 6014, subgenreId: 7012, ratings: 5, stars: 4.5, releaseDate: '2026-09-01', updated: null },
+    { id: 2, name: 'Y', seller: '', genreId: 6003, subgenreId: null, ratings: 0, stars: null, releaseDate: null, updated: null },
   ]);
 });
 

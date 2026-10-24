@@ -1,10 +1,10 @@
 // Datele pentru interfata: serie + index din SQLite -> functiile pure din metrics/.
 import { COUNTRIES, CHART_TYPES, DOWNLOAD_TYPES } from '../apple/clients.js';
-import { genreName, GENRES } from '../apple/genres.js';
+import { genreName, GENRES, MIXED } from '../apple/genres.js';
 import { newTerms, rising, falling, topTerms, disappeared, warmup } from '../metrics/trends.js';
 import { chartMovers, themes } from '../metrics/themes.js';
 import { addDays, diffDays } from '../util/dates.js';
-import { competition, opportunity, chance, isFlooding, saturated, marketEstimate } from '../metrics/niche.js';
+import { competition, opportunity, chance, isFlooding, saturated, marketEstimate, notANiche, dominantBrand, navigational } from '../metrics/niche.js';
 import { BIG_RATINGS } from '../metrics/score.js';
 
 export const SERIES_DAYS = 45;
@@ -416,7 +416,8 @@ export function makeViews(db) {
   }
 
   // Nise calde: cuvintele noi si cele in crestere, cu concurenta din primele 10 app-uri si cine face bani acolo.
-  function nicheView({ country = 'US', category = 'all', period = 14, brands = false, limit = MAX_ROWS }) {
+  // Implicit ascundem ce nu e o nisa reala (vezi notANiche); all = true le arata si pe ele, marcate.
+  function nicheView({ country = 'US', category = 'all', period = 14, brands = false, all = false, limit = MAX_ROWS }) {
     const ccs = country === 'ALL' ? COUNTRIES : [country];
     const p = Number(period) || 14;
     const rows = [];
@@ -432,6 +433,8 @@ export function makeViews(db) {
       for (const r of rising(series, 7)) if (!cand.has(r.term)) cand.set(r.term, { ...r, isNew: false });
       const recent = series.dates.length ? addDays(series.dates.at(-1), -180) : null;
       const vel = velocity(cc).map;
+      const nameOf = db.prepare('SELECT name, seller FROM app_meta WHERE country=? AND id=?');
+      const big = bigOf(cc);
       for (const r of cand.values()) {
         const i = index.get(r.term) ?? {};
         const nRow = nicheOf.get(cc, r.term)?.niche;
@@ -441,23 +444,34 @@ export function makeViews(db) {
         const ch = chance(niche);
         const sat = saturated(r.term);
         const rpd = top.map((id) => vel.get(id)?.perDay).filter((v) => v != null);
+        const market = rpd.length ? marketEstimate(rpd.reduce((n, v) => n + v, 0)) : null;
+        const brand = !!niche?.brand || dominantBrand(r.term, top.filter((id) => vel.get(id)?.perDay != null)
+          .map((id) => ({ perDay: vel.get(id).perDay, name: nameOf.get(cc, id)?.name })));
         const moneyApps = top.filter((id) => grossing.has(id));
         const newApps = top.filter((id) => { const d = fresh.get(cc, id)?.release_date; return d && recent && d >= recent; });
         rows.push(enrich(cc, index, {
           term: r.term, score: r.score, delta: r.delta ?? null, isNew: r.isNew, firstSeen: r.firstSeen ?? null,
           preliminary: r.preliminary ?? false,
-          competition: comp, brand: !!niche?.brand,
-          opportunity: opportunity({ score: r.score, delta: r.delta, isNew: r.isNew, comp, brand: niche?.brand, chance: ch, sat }),
+          competition: comp, brand,
+          opportunity: opportunity({ score: r.score, delta: r.delta, isNew: r.isNew, comp, brand, chance: ch, sat }),
           chance: ch?.value ?? null, chanceApprox: !!ch?.approx, flooding: isFlooding(niche), sat,
-          market: rpd.length ? marketEstimate(rpd.reduce((n, v) => n + v, 0)) : null, marketApps: rpd.length,
+          market, marketApps: rpd.length, notNiche: notANiche({ term: r.term, niche, market, proven: big.has(r.term),
+            navig: navigational(r.term, top.slice(0, 3).map((id) => nameOf.get(cc, id) ?? {})) }),
           niche, moneyApps: moneyApps.length, freshApps: niche ? niche.fresh : newApps.length,
           apps: top.slice(0, 3), moneyIds: moneyApps.slice(0, 3),
         }));
       }
     }
-    const out = rows.filter(matchCategory(category)).filter((r) => brands || !r.brand)
-      .sort((a, b) => (b.opportunity ?? -1) - (a.opportunity ?? -1) || b.score - a.score);
-    return { total: out.length, rows: out.slice(0, limit), measured: out.filter((r) => r.competition != null).length };
+    const inCat = rows.filter(matchCategory(category)).filter((r) => brands || !r.brand);
+    const hidden = { few: 0, money: 0, lang: 0, brand: 0, code: 0, mixed: 0 };
+    for (const r of inCat) {
+      // Rezultate din categorii fara legatura (sub 4 din 10 in aceeasi): Apple nu stie ce e cuvantul (de obicei un nume).
+      if (!r.notNiche && r.category === MIXED) r.notNiche = 'mixed';
+      if (r.notNiche) hidden[r.notNiche]++;
+    }
+    const out = inCat.filter((r) => all || !r.notNiche)
+      .sort((a, b) => (!!a.notNiche - !!b.notNiche) || (b.opportunity ?? -1) - (a.opportunity ?? -1) || b.score - a.score);
+    return { total: out.length, rows: out.slice(0, limit), measured: out.filter((r) => r.competition != null).length, hidden };
   }
 
   const metaOf = (cc) => new Map(db.prepare('SELECT id, name, genre_id, release_date, seller FROM app_meta WHERE country=?').all(cc).map((m) => [m.id, m]));

@@ -30,6 +30,7 @@ export function parseSearch(json) {
   return (json.results ?? []).slice(0, 10).map((r) => ({
     id: r.trackId,
     name: r.trackName ?? '',
+    seller: r.sellerName ?? r.artistName ?? '',
     genreId: Number(r.primaryGenreId),
     subgenreId: (r.genreIds ?? []).map(Number).find((g) => g >= 7000 && g < 8000) ?? null,
     ratings: r.userRatingCount ?? 0,

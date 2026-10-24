@@ -114,7 +114,7 @@ export function createServer({ db, dataDir, refresh = async () => ({}), apple = 
     '/api/breakouts': (q) => views.breakoutView({ country: q.get('country'), category: q.get('category') }),
     '/api/changes': (q) => views.changesView({ country: q.get('country'), category: q.get('category'), period: q.get('period'), who: q.get('who') ?? 'money' }),
     '/api/new-apps': (q) => views.newApps({ country: q.get('country'), category: q.get('category'), type: q.get('type') ?? 'all', launched: q.get('period'), source: q.get('source') ?? 'charts' }),
-    '/api/niches': (q) => views.nicheView({ country: q.get('country'), category: q.get('category'), period: q.get('period') }),
+    '/api/niches': (q) => views.nicheView({ country: q.get('country'), category: q.get('category'), period: q.get('period'), all: q.get('all') === '1' }),
     '/api/genre': (q) => ({ name: genreName(Number(q.get('id'))) }),
   };
 

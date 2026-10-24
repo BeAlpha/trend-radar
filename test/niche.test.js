@@ -8,8 +8,8 @@ test('nicheStats: mediana, nota, noi si cuvantul in titlu (fara diacritice)', ()
     { name: 'Puzzle', ratings: 1000, stars: 3, releaseDate: '2019-01-01' },
     { name: 'CAT café game', ratings: 50, stars: null, releaseDate: '2026-01-01' },
   ];
-  assert.deepEqual(nicheStats(apps, 'cat cafe', '2026-10-12'), { n: 3, med: 50, max: 1000, tmax: 50, stars: 3.5, fresh: 1, title: 2, brand: false, weak: 2, fresh90: 1, stale: 0 });
-  assert.deepEqual(nicheStats([], 'x', '2026-10-12'), { n: 0, med: 0, max: 0, tmax: 0, stars: null, fresh: 0, title: 0, brand: false, weak: 0, fresh90: 0, stale: 0 });
+  assert.deepEqual(nicheStats(apps, 'cat cafe', '2026-10-12'), { n: 3, med: 50, max: 1000, tmax: 50, stars: 3.5, fresh: 1, title: 2, brand: false, navig: false, weak: 2, fresh90: 1, stale: 0 });
+  assert.deepEqual(nicheStats([], 'x', '2026-10-12'), { n: 0, med: 0, max: 0, tmax: 0, stars: null, fresh: 0, title: 0, brand: false, navig: false, weak: 0, fresh90: 0, stale: 0 });
 });
 
 test('competition / opportunity', () => {
@@ -66,4 +66,45 @@ test('chance / saturated / marketEstimate / opportunity cu categoriile respinse 
   assert.equal(opportunity({ score: 50, comp: 40, sat: { level: 'ban' } }), 0);
   assert.equal(opportunity({ score: 50, delta: 10, comp: 40, sat: { level: 'hard' } }), 30);
   assert.equal(opportunity({ score: 50, delta: 10, comp: 40, chance: { value: 80, approx: false } }), 70);
+});
+
+test('notANiche: putine app-uri, fara bani, alta limba; nisele reale trec', async () => {
+  const { notANiche, foreignLetters } = await import('../src/metrics/niche.js');
+  const ok = { n: 10 };
+  assert.equal(notANiche({ term: 'obec dravce', niche: { n: 2 }, market: null }), 'few');
+  assert.equal(notANiche({ term: 'yk soft', niche: ok, market: { month: 0 } }), 'money');
+  assert.equal(notANiche({ term: 'güzellik salonu', niche: ok, market: { month: 5000 } }), null, 'ü e litera germana');
+  assert.equal(notANiche({ term: 'oya yıldırım', niche: ok, market: { month: 5000 } }), 'lang');
+  assert.equal(notANiche({ term: 'obec šarišské', niche: ok, market: { month: 5000 } }), 'lang');
+  assert.equal(notANiche({ term: 'кино онлайн', niche: ok, market: null }), 'lang');
+  assert.equal(notANiche({ term: 'café für straße', niche: ok, market: { month: 900 } }), null);
+  assert.equal(notANiche({ term: 'plant identifier', niche: null, market: null }), null, 'nemasurat: nu ascundem');
+  assert.equal(foreignLetters('niño cœur'), false);
+});
+
+test('dominantBrand: un singur app face 80%+ din rating-uri si are cuvantul in nume', async () => {
+  const { dominantBrand } = await import('../src/metrics/niche.js');
+  assert.equal(dominantBrand('zvoove work', [{ name: 'zvoove Work App', perDay: 900 }, { name: 'Timesheet', perDay: 20 }]), true);
+  assert.equal(dominantBrand('photo editor', [{ name: 'Picsart AI Photo Editor', perDay: 500 }, { name: 'Snapseed', perDay: 300 }]), false, 'sub 80%');
+  assert.equal(dominantBrand('timer', [{ name: 'Big App', perDay: 900 }, { name: 'Timer+', perDay: 10 }]), false, 'dominantul nu are cuvantul');
+  assert.equal(dominantBrand('x', []), false);
+});
+
+test('navigational: firma din primele 3 are un cuvant al cautarii in nume, sau primul app se numeste exact asa', async () => {
+  const { navigational, notANiche } = await import('../src/metrics/niche.js');
+  assert.equal(navigational('dometic cfx', [{ name: 'Other', seller: 'X' }, { name: 'CFX', seller: 'Dometic Holding AB' }]), true);
+  assert.equal(navigational("pj's pizza", [{ name: "PJ's Pizza", seller: 'Pizzamico LLC' }]), true);
+  assert.equal(navigational('plant identifier', [{ name: 'PictureThis - Plant Identifier', seller: 'Glority Global Group Ltd.' }]), false);
+  assert.equal(navigational('photo editor', [{ name: 'Picsart AI Photo Editor', seller: 'PicsArt, Inc.' }, { name: 'Editor', seller: 'Mobile Apps LLC' }]), false);
+  assert.equal(notANiche({ term: 'yfc', niche: { n: 9 }, market: null }), 'code');
+  assert.equal(notANiche({ term: 'vpn', niche: { n: 10 }, market: null, proven: true }), null, 'trafic dovedit');
+  assert.equal(notANiche({ term: 'georgia power', niche: { n: 10, navig: true }, market: null }), 'brand');
+});
+
+test('navigational: firma, site sau titlul complet al unui app in cautarea insasi', async () => {
+  const { navigational } = await import('../src/metrics/niche.js');
+  for (const t of ['jtr labs llc', 'qed gaming pty. ltd', 'jm zengge co., ltd', 'zkteco inc.', 'uqur.cn', 'www.dkefe.com', 'chattale: chat wrapped', 'letterbox - daily word games'])
+    assert.equal(navigational(t, []), true, t);
+  for (const t of ['bpm counter', 'baby high contrast cards', 'x-ray scanner body', 'compte à rebours', 'drone-uav', 'ab workout'])
+    assert.equal(navigational(t, []), false, t);
 });

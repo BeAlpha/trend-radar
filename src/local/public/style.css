@@ -171,3 +171,4 @@ td.term .meta { margin-top: 3px; }
 .trends-links a { margin-right: 8px; }
 .est-row { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 6px; }
 .est-row div b { font-size: 15px; }
+tr.dim td { opacity: .55; }

@@ -77,7 +77,7 @@ const VIEWS = {
   search: { title: 'Caută kw', periods: null },
   app: { title: 'Aplicație', periods: null },
 };
-const state = { view: 'new', country: 'US', category: 'all', period: 7, origin: 'appeared', chartType: 'all', source: 'charts', who: 'money', text: '', sort: null, rows: [], term: '', appId: null, appCountry: 'US', appKwAll: false };
+const state = { view: 'new', country: 'US', category: 'all', period: 7, origin: 'appeared', chartType: 'all', source: 'charts', who: 'money', allNiches: false, text: '', sort: null, rows: [], term: '', appId: null, appCountry: 'US', appKwAll: false };
 
 const COLS = {
   country: { label: 'Țara' },
@@ -151,7 +151,7 @@ const diffDots = (d) => (d == null ? '<span class="muted">–</span>' : `<span c
 function cell(col, r) {
   const v = r[col];
   switch (col) {
-    case 'term': return `<td class="term"><a data-term="${esc(r.term)}">${esc(r.term)}</a>${r.sat || r.flooding ? `<div class="meta">${satBadge(r.sat)}${r.flooding ? ` <span class="badge warn" data-tip="${esc(`${r.niche.fresh90} din primele 10 sunt lansate în ultimele 90 de zile: alții au văzut deja nișa. Se poate intra, dar trebuie repede.`)}">se umple</span>` : ''}</div>` : ''}</td>`;
+    case 'term': return `<td class="term"><a data-term="${esc(r.term)}">${esc(r.term)}</a>${r.sat || r.flooding || r.notNiche ? `<div class="meta">${r.notNiche ? `<span class="badge" data-tip="${esc(NOT_NICHE[r.notNiche])}">nu e nișă</span> ` : ''}${satBadge(r.sat)}${r.flooding ? ` <span class="badge warn" data-tip="${esc(`${r.niche.fresh90} din primele 10 sunt lansate în ultimele 90 de zile: alții au văzut deja nișa. Se poate intra, dar trebuie repede.`)}">se umple</span>` : ''}</div>` : ''}</td>`;
     case 'score': return `<td class="num">${v ?? '–'}<span class="scorebar"><i style="width:${Math.max(0, Math.min(100, v ?? 0))}%"></i></span></td>`;
     case 'delta': return `<td class="num ${v > 0 ? 'up' : 'down'}">${v > 0 ? '+' : ''}${v}</td>`;
     case 'then': case 'seenDays': return `<td class="num">${v ?? '–'}</td>`;
@@ -276,9 +276,31 @@ function appsNotice(r) {
     : '<div class="notice">Încă nu avem datele de lansare ale aplicațiilor din topuri. Ele se adună la colectarea zilnică.</div>';
 }
 
+const NOT_NICHE = {
+  money: 'Aplicațiile din primele locuri nu fac aproape nimic (sub ~$300/lună estimat): nimeni nu caută asta ca să plătească.',
+  few: 'Apple găsește sub 6 aplicații: e o căutare izolată (un nume, un cod), nu o piață.',
+  lang: 'Cuvânt în altă limbă decât cele ale țărilor urmărite: puțini oameni, greu de țintit.',
+  brand: 'Căutare după o firmă sau o aplicație anume (ex. „georgia power”): oamenii vor exact aplicația aceea, nu una nouă.',
+  mixed: 'Apple găsește aplicații din categorii fără legătură între ele: nu e clar ce caută oamenii (de obicei e numele unei firme sau al unui loc).',
+  code: 'Un cod sau o prescurtare de 2–4 litere fără trafic dovedit (ex. „yfc”): nu știm ce caută oamenii.',
+};
+
 function nichesNotice(r) {
   const left = r.total - r.measured;
-  $('#notice').innerHTML = `<div class="notice info">Cuvintele noi și cele în creștere, cu cât de grea e concurența și cine face bani pe ele. Sus sunt nișele cu cerere mare și concurență mică: acolo merită să intri cu o aplicație. Căutările după o aplicație anume (mărci ca „google meet”) sunt ascunse.${left > 0 ? ` La ${left} cuvinte concurența încă nu e măsurată (se completează zilnic, cele noi primele).` : ''}</div>`;
+  const h = r.hidden ?? {};
+  const parts = [h.money && `${h.money} unde aplicațiile din top nu fac aproape nimic (sub ~$300/lună)`,
+    h.few && `${h.few} unde Apple găsește sub 6 aplicații (o căutare izolată, nu o piață)`,
+    h.brand && `${h.brand} căutări după o firmă sau o aplicație anume`,
+    h.code && `${h.code} coduri sau prescurtări de 2–4 litere`,
+    h.mixed && `${h.mixed} cu rezultate amestecate (Apple nu știe ce sunt)`,
+    h.lang && `${h.lang} în altă limbă`].filter(Boolean);
+  const hiddenTxt = parts.length
+    ? (state.allNiches
+      ? ` Le arăt și pe cele care nu sunt nișe reale, la coada listei, marcate cu gri. <a href="#" id="niches-toggle">Ascunde-le</a>.`
+      : ` Am ascuns ${parts.join(', ')}. <a href="#" id="niches-toggle">Arată-le</a>.`)
+    : '';
+  $('#notice').innerHTML = `<div class="notice info">Cuvintele noi și cele în creștere, cu cât de grea e concurența și cine face bani pe ele. Sus sunt nișele cu cerere mare și concurență mică: acolo merită să intri cu o aplicație. Căutările după o aplicație anume (mărci ca „google meet”) sunt ascunse.${hiddenTxt}${left > 0 ? ` La ${left} cuvinte concurența încă nu e măsurată (se completează zilnic, cele noi primele).` : ''}</div>`;
+  $('#niches-toggle')?.addEventListener('click', (e) => { e.preventDefault(); state.allNiches = !state.allNiches; renderView(); });
 }
 
 function breakoutsNotice(r) {
@@ -331,7 +353,7 @@ function renderTable() {
   $('#content').innerHTML = rows.length
     ? `<p class="count">${rows.length} ${state.view === 'changes' ? 'schimbări' : APP_VIEWS.includes(state.view) ? 'aplicații' : 'cuvinte'}${rows.length > shown.length ? ` · afișate primele ${shown.length} ${[...APP_VIEWS, 'niches'].includes(state.view) ? ' (filtrează ca să vezi restul)' : ' (exportă CSV pentru toate)'}` : ''}${state.total > state.rows.length ? ` · total ${state.total}` : ''}</p>
        <div class="card"><table><thead><tr>${head}</tr></thead>
-       <tbody>${shown.map((r) => `<tr>${cols.map((c) => cell(c, r)).join('')}</tr>`).join('')}</tbody></table></div>`
+       <tbody>${shown.map((r) => `<tr${r.notNiche ? ' class="dim"' : ''}>${cols.map((c) => cell(c, r)).join('')}</tr>`).join('')}</tbody></table></div>`
     : '<div class="card empty">Nimic de afișat pentru filtrele alese.</div>';
   loadIcons().catch(() => {});
 }
@@ -382,7 +404,7 @@ async function renderView(scrollY = 0) {
   if (state.view === 'search') { renderSearch(); return window.scrollTo(0, 0); }
   if (state.view === 'app') { await renderApp(); return window.scrollTo(0, scrollY); }
   if (state.view === 'themes') { await renderThemes(); return window.scrollTo(0, scrollY); }
-  const params = new URLSearchParams({ name: state.view, country: state.country, category: state.category, period: state.period, origin: state.origin, type: state.chartType, source: state.source, who: state.who });
+  const params = new URLSearchParams({ name: state.view, country: state.country, category: state.category, period: state.period, origin: state.origin, type: state.chartType, source: state.source, who: state.who, all: state.allNiches ? '1' : '0' });
   const key = params.toString();
   if (!viewCache.has(key)) {
     $('#content').innerHTML = '<div class="empty">Se calculează…</div>';

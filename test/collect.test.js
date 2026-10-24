@@ -58,7 +58,7 @@ test('runCountry scrie fisierul zilei si clasificarile', async () => {
   assert.equal(Object.keys(cls).length, 3);
   assert.equal(cls['a one'].category, 6003);
   assert.equal(cls['a one'].difficulty, 1);
-  assert.deepEqual(cls['a one'].niche, { n: 5, med: 100, max: 100, tmax: 0, stars: 4, fresh: 0, title: 0, brand: false, weak: 5, fresh90: 0, stale: 0 });
+  assert.deepEqual(cls['a one'].niche, { n: 5, med: 100, max: 100, tmax: 0, stars: 4, fresh: 0, title: 0, brand: false, navig: false, weak: 5, fresh90: 0, stale: 0 });
   assert.equal(s.queueLeft, 1);
 });
 

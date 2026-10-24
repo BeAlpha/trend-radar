@@ -14,7 +14,7 @@ import { collectAppMeta } from './app-meta.js';
 
 const NEW_PRIORITY_DAYS = 7;
 export const NICHE_DAYS = 14;
-export const NICHE_APPS_MAX = 3000;
+export const NICHE_APPS_MAX = 15000; // ~150 cereri lookup (100 id-uri/cerere), ~10 min
 export const RECLASSIFY_DAYS = 30;
 export const MAX_FAILURE_RATE = 0.1;
 
